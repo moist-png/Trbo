@@ -30,4 +30,3 @@ accounts, saved workouts, and FTP history.
 - `src/supabaseClient.js` \u2014 your Supabase connection details
 - `supabase-setup.sql` \u2014 the database setup script (already run, kept here for reference)
 
-<!-- push access verified Sat Jul  4 01:18:07 UTC 2026 -->
