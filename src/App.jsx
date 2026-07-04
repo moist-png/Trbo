@@ -1569,18 +1569,147 @@ const HOME_TILES = [
   { key: 'ftp', label: 'FTP', caption: 'Test & track', icon: Gauge },
 ];
 
-function HomeView({ account, onNavigate }) {
+function daysSince(dateStr) {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+}
+function mostRecentEntry(list, predicate) {
+  const matches = predicate ? list.filter(predicate) : list;
+  if (!matches || matches.length === 0) return null;
+  return matches.reduce((a, b) => (new Date(a.date) > new Date(b.date) ? a : b));
+}
+// Picks the single most useful nudge to show on the home screen, checking
+// progressively less-urgent signals and stopping at the first one that fires.
+function buildNextUpSuggestion(ftpHistory, workoutHistory) {
+  if (!ftpHistory || ftpHistory.length === 0) {
+    return { text: 'You haven\u2019t tested your FTP yet \u2014 run a quick test so your power targets are accurate.', action: 'ftp', cta: 'Test FTP' };
+  }
+  const lastFtp = ftpHistory[ftpHistory.length - 1];
+  const daysSinceFtp = daysSince(lastFtp.date);
+  if (daysSinceFtp >= 42) {
+    return { text: `It's been ${daysSinceFtp} days since your last FTP test \u2014 worth retesting to keep your targets sharp.`, action: 'ftp' };
+  }
+  if (!workoutHistory || workoutHistory.length === 0) {
+    return { text: 'Ready for your first session? Workouts and Rides both have plenty to choose from.', action: 'basics' };
+  }
+  const lastVO2 = mostRecentEntry(workoutHistory, w => /vo2/i.test(w.name));
+  const daysSinceVO2 = lastVO2 ? daysSince(lastVO2.date) : null;
+  if (daysSinceVO2 === null || daysSinceVO2 >= 14) {
+    return {
+      text: daysSinceVO2 == null ? 'You haven\u2019t logged a VO2 max session yet \u2014 worth adding one for a fitness boost.' : `You haven't done a VO2 max session in ${daysSinceVO2} days.`,
+      action: 'basics',
+    };
+  }
+  const lastRide = mostRecentEntry(workoutHistory, w => w.category === 'Rides');
+  const daysSinceRide = lastRide ? daysSince(lastRide.date) : null;
+  if (daysSinceRide === null || daysSinceRide >= 10) {
+    return {
+      text: daysSinceRide == null ? 'You haven\u2019t done a long ride yet \u2014 the Rides library has plenty to choose from.' : `It's been ${daysSinceRide} days since your last ride.`,
+      action: 'rides',
+    };
+  }
+  const lastAny = mostRecentEntry(workoutHistory);
+  const daysSinceAny = lastAny ? daysSince(lastAny.date) : null;
+  const lastRecovery = mostRecentEntry(workoutHistory, w => /recovery/i.test(w.name));
+  const daysSinceRecovery = lastRecovery ? daysSince(lastRecovery.date) : null;
+  if (daysSinceAny !== null && daysSinceAny >= 5 && (daysSinceRecovery == null || daysSinceRecovery >= 10)) {
+    return { text: 'It\u2019s been a few days since your last session \u2014 maybe ease back in with a recovery spin.', action: 'basics' };
+  }
+  return { text: 'You\u2019re riding consistently \u2014 keep it up.', action: null };
+}
+
+function Sparkline({ values, height = 28, color }) {
+  if (!values || values.length < 2) return null;
+  const width = 200;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const stepX = width / (values.length - 1);
+  const toY = v => height - 4 - ((v - min) / range) * (height - 8);
+  const points = values.map((v, i) => `${i * stepX},${toY(v)}`).join(' ');
+  const lastX = (values.length - 1) * stepX;
+  const lastY = toY(values[values.length - 1]);
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" style={{ display: 'block', marginTop: 4 }}>
+      <polyline points={points} fill="none" stroke={color || 'var(--accent)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={lastX} cy={lastY} r="3.5" fill={color || 'var(--accent)'} />
+    </svg>
+  );
+}
+
+function HistoryRow({ entry }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '10px 12px' }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, color: TEXT, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</div>
+        <div style={{ fontSize: 11.5, color: SUB }}>{new Date(entry.date).toLocaleDateString()} · {fmtLong(entry.duration)}</div>
+      </div>
+      {!entry.completed && <div style={{ fontSize: 10, color: SUB, border: `1px solid ${LINE}`, borderRadius: 999, padding: '2px 8px', flexShrink: 0 }}>Partial</div>}
+    </div>
+  );
+}
+
+function HomeView({ account, ftpHistory, workoutHistory, onNavigate }) {
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Late one' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const firstName = (account && account.name ? account.name.split(' ')[0] : '') || 'Rider';
 
+  const weekAgo = Date.now() - 7 * 86400000;
+  const thisWeek = (workoutHistory || []).filter(w => new Date(w.date).getTime() >= weekAgo);
+  const weekSeconds = thisWeek.reduce((a, w) => a + w.duration, 0);
+
+  const ftpValues = (ftpHistory || []).slice(-8).map(h => h.ftp);
+  const currentFtpVal = ftpValues.length ? ftpValues[ftpValues.length - 1] : null;
+  const prevFtpVal = ftpValues.length > 1 ? ftpValues[ftpValues.length - 2] : null;
+  const ftpDelta = currentFtpVal != null && prevFtpVal != null ? currentFtpVal - prevFtpVal : null;
+
+  const suggestion = buildNextUpSuggestion(ftpHistory, workoutHistory);
+  const recent = (workoutHistory || []).slice().reverse().slice(0, 5);
+
   return (
-    <div style={{ padding: '36px 20px 40px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+    <div style={{ padding: '32px 20px 40px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <Zap size={26} color="var(--accent)" style={{ marginBottom: 10 }} />
       <div style={{ fontSize: 12.5, color: SUB, fontWeight: 700, letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 6 }}>{greeting}</div>
-      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, marginBottom: 34, textAlign: 'center' }}>{firstName}, ready to ride?</div>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, marginBottom: 24, textAlign: 'center' }}>{firstName}, ready to ride?</div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, width: '100%', maxWidth: 420 }}>
+      <div style={{ display: 'flex', gap: 12, width: '100%', maxWidth: 420, marginBottom: 14 }}>
+        <div style={{ flex: 1, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
+          <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 6 }}>This week</div>
+          <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 20, fontWeight: 700, color: TEXT }}>{weekSeconds > 0 ? fmtLong(weekSeconds) : '0 min'}</div>
+          <div style={{ fontSize: 11.5, color: SUB, marginTop: 2 }}>{thisWeek.length} session{thisWeek.length === 1 ? '' : 's'}</div>
+        </div>
+        <div style={{ flex: 1, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
+          <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 6 }}>FTP</div>
+          {currentFtpVal != null ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 20, fontWeight: 700, color: TEXT }}>{currentFtpVal}W</div>
+                {ftpDelta != null && ftpDelta !== 0 && (
+                  <div style={{ fontSize: 11, color: ftpDelta > 0 ? '#8FC93A' : SUB }}>{ftpDelta > 0 ? '+' : ''}{ftpDelta}</div>
+                )}
+              </div>
+              {ftpValues.length >= 2 ? <Sparkline values={ftpValues} /> : <div style={{ fontSize: 11.5, color: SUB, marginTop: 4 }}>Test again to see a trend</div>}
+            </>
+          ) : (
+            <div style={{ fontSize: 11.5, color: SUB, marginTop: 2 }}>No tests yet</div>
+          )}
+        </div>
+      </div>
+
+      {suggestion.text && (
+        <button onClick={() => suggestion.action && onNavigate(suggestion.action)} style={{
+          width: '100%', maxWidth: 420, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12,
+          background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, marginBottom: 24,
+          cursor: suggestion.action ? 'pointer' : 'default',
+        }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: PANEL2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Zap size={16} color="var(--accent)" />
+          </div>
+          <div style={{ flex: 1, fontSize: 13, color: TEXT, lineHeight: 1.4 }}>{suggestion.text}</div>
+          {suggestion.action && <ChevronRight size={18} color={SUB} style={{ flexShrink: 0 }} />}
+        </button>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, width: '100%', maxWidth: 420, marginBottom: recent.length ? 30 : 0 }}>
         {HOME_TILES.map(({ key, label, caption, icon: Icon }) => (
           <button key={key} onClick={() => onNavigate(key)} style={{
             aspectRatio: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -1594,6 +1723,43 @@ function HomeView({ account, onNavigate }) {
           </button>
         ))}
       </div>
+
+      {recent.length > 0 && (
+        <div style={{ width: '100%', maxWidth: 420 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: SUB, textTransform: 'uppercase', letterSpacing: 0.6 }}>Recent activity</div>
+            <button onClick={() => onNavigate('history')} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer' }}>See all</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {recent.map(entry => <HistoryRow key={entry.id} entry={entry} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- full workout history ----------
+function HistoryView({ workoutHistory, onClear }) {
+  const all = (workoutHistory || []).slice().reverse();
+  return (
+    <div style={{ padding: '16px 16px 80px' }}>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, letterSpacing: 0.3, marginBottom: 2 }}>History</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: SUB }}>{all.length} session{all.length === 1 ? '' : 's'} logged</div>
+        {all.length > 0 && (
+          <button onClick={onClear} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Trash2 size={12} /> Clear
+          </button>
+        )}
+      </div>
+      {all.length === 0 ? (
+        <div style={{ color: SUB, fontSize: 13, textAlign: 'center', padding: '30px 0' }}>No workouts logged yet — finish a session and it'll show up here.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {all.map(entry => <HistoryRow key={entry.id} entry={entry} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1889,7 +2055,7 @@ function avgOf(samples) {
 }
 
 // ---------- player ----------
-function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, onApplyFtp }) {
+function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, onApplyFtp, onSessionEnd }) {
   const intervals = workout.intervals;
   const isRampTest = !!workout.autoStopTest;
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -1907,7 +2073,29 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
   const lastStepAvgRef = useRef(null); // average watts of the last fully-completed ramp step
   const underPowerStreakRef = useRef(0); // consecutive seconds under the fail threshold
   const triggerAutoStopRef = useRef(() => {});
+  const loggedRef = useRef(false); // guards against logging the same session twice
   const { beep } = useBeeper();
+
+  // Elapsed time in seconds up to a given point in the workout \u2014 used both
+  // for the on-screen progress bar and for what gets logged to history.
+  function computeElapsedSeconds(atIndex = currentIndex, atTimeLeft = timeLeft) {
+    const before = totalDuration(intervals.slice(0, atIndex));
+    const cur = intervals[atIndex];
+    return before + (cur.duration - Math.max(0, atTimeLeft));
+  }
+  function logSession(completed, durationOverride) {
+    if (loggedRef.current) return;
+    loggedRef.current = true;
+    if (onSessionEnd) {
+      onSessionEnd({
+        workoutId: workout.id || null,
+        name: workout.name,
+        category: workout.category || 'Custom',
+        duration: durationOverride != null ? durationOverride : computeElapsedSeconds(),
+        completed,
+      });
+    }
+  }
 
   useEffect(() => { trainerPowerRef.current = trainer.power; }, [trainer.power]);
 
@@ -1918,6 +2106,7 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
     const estimateFrom = lastStepAvgRef.current;
     setIsPlaying(false);
     setIsDone(true);
+    logSession(true, computeElapsedSeconds());
     if (estimateFrom == null) return; // failed before completing a single tracked step \u2014 not enough data to guess FTP
     const mult = workout.ftpMultiplier || 0.75;
     const estimate = Math.round(estimateFrom * mult);
@@ -1979,6 +2168,7 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
       if (settings.soundCompletion) beep(1046, 0.45, 0.25 * settings.soundVolume);
       setIsPlaying(false);
       setIsDone(true);
+      logSession(true, totalDuration(intervals));
       if (isRampTest) {
         const finishedStep = intervals[currentIndex];
         const avg = finishedStep.label !== 'Warm up' && finishedStep.label !== 'Cool down' ? avgOf(stepSamplesRef.current) : null;
@@ -2055,8 +2245,14 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
   }
   function performAction(action) {
     setPendingAction(null);
-    if (action === 'exit') onExit();
-    else if (action === 'restart') restart();
+    if (action === 'exit') {
+      if (!isDone) logSession(false);
+      onExit();
+    } else if (action === 'restart') {
+      if (!isDone) logSession(false);
+      restart();
+      loggedRef.current = false; // the next attempt is a fresh session, allow it to be logged too
+    }
   }
   function cancelPendingAction() {
     setPendingAction(null);
@@ -2668,6 +2864,7 @@ export default function App() {
   const [settings, setSettingsState] = useState(DEFAULT_SETTINGS);
   const [customWorkouts, setCustomWorkouts] = useState([]);
   const [ftpHistory, setFtpHistory] = useState([]);
+  const [workoutHistory, setWorkoutHistory] = useState([]);
   const [detailWorkout, setDetailWorkout] = useState(null);
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [activeWorkout, setActiveWorkout] = useState(null);
@@ -2708,7 +2905,7 @@ export default function App() {
 
   // Once we know who's logged in, load their profile + saved data from the database.
   useEffect(() => {
-    if (!user) { setProfile(null); setCustomWorkouts([]); setFtpHistory([]); return; }
+    if (!user) { setProfile(null); setCustomWorkouts([]); setFtpHistory([]); setWorkoutHistory([]); return; }
     let mounted = true;
     (async () => {
       setProfileLoading(true);
@@ -2730,6 +2927,8 @@ export default function App() {
       if (mounted && workouts) setCustomWorkouts(workouts.map(w => w.workout));
       const { data: history } = await supabase.from('ftp_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
       if (mounted && history) setFtpHistory(history.map(h => ({ id: h.id, date: h.date, ftp: h.ftp, source: h.source })));
+      const { data: sessions } = await supabase.from('workout_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
+      if (mounted && sessions) setWorkoutHistory(sessions.map(s => ({ id: s.id, date: s.date, workoutId: s.workout_id, name: s.name, category: s.category, duration: s.duration, completed: s.completed })));
       if (mounted) setProfileLoading(false);
     })();
     return () => { mounted = false; };
@@ -2812,6 +3011,19 @@ export default function App() {
   function clearFtpHistory() {
     setFtpHistory([]);
     if (user) supabase.from('ftp_history').delete().eq('user_id', user.id).then(() => {});
+  }
+  // Called once per session by the player, either when a workout finishes
+  // naturally or when the rider confirms exiting/restarting partway through.
+  function recordWorkoutSession({ workoutId, name, category, duration, completed }) {
+    const entry = { id: newId(), date: new Date().toISOString(), workoutId, name, category, duration, completed };
+    setWorkoutHistory(list => [...list, entry]);
+    if (user) supabase.from('workout_history').insert({
+      id: entry.id, user_id: user.id, workout_id: workoutId, name, category, duration, completed, date: entry.date,
+    }).then(() => {});
+  }
+  function clearWorkoutHistory() {
+    setWorkoutHistory([]);
+    if (user) supabase.from('workout_history').delete().eq('user_id', user.id).then(() => {});
   }
 
   function saveCustomWorkout(workout) {
@@ -2908,7 +3120,7 @@ export default function App() {
       <div style={wrapStyle}>
         <style>{globalStyle}</style>
         <OrientationGate preferredOrientation={settings.preferredOrientation}>
-          <PlayerView workout={activeWorkout} ftp={ftp} settings={settings} trainer={trainer} onExit={() => setActiveWorkout(null)} onSaveFtpResult={recordFtpResult} onApplyFtp={setFtp} />
+          <PlayerView workout={activeWorkout} ftp={ftp} settings={settings} trainer={trainer} onExit={() => setActiveWorkout(null)} onSaveFtpResult={recordFtpResult} onApplyFtp={setFtp} onSessionEnd={recordWorkoutSession} />
         </OrientationGate>
       </div>
     );
@@ -2920,12 +3132,13 @@ export default function App() {
       <OrientationGate preferredOrientation={settings.preferredOrientation}>
         {!subscribed && <TrialBanner daysLeft={daysLeft} onUpgrade={() => setShowPaywallModal(true)} />}
 
-        {view === 'home' && <HomeView account={account} onNavigate={setView} />}
+        {view === 'home' && <HomeView account={account} ftpHistory={ftpHistory} workoutHistory={workoutHistory} onNavigate={setView} />}
         {view === 'library' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} />}
         {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" />}
         {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" />}
         {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
         {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
+        {view === 'history' && <HistoryView workoutHistory={workoutHistory} onClear={clearWorkoutHistory} />}
         {view === 'settings' && (
           <SettingsView
             settings={settings} updateSetting={updateSetting} ftp={ftp} setFtp={setFtp} trainer={trainer}
