@@ -1,0 +1,2733 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  Play, Pause, SkipForward, SkipBack, RotateCcw, X, Plus, Trash2, ChevronUp, ChevronDown,
+  Search, Library, Wrench, Gauge, Save, Edit3, Copy, Settings as SettingsIcon, Bluetooth,
+  BluetoothOff, Volume2, Sun, RefreshCw, Check, Zap, ChevronDown as ChevDown, Bike, Dumbbell,
+} from 'lucide-react';
+import { supabase } from './supabaseClient';
+
+// ---------- palette ----------
+const INK = '#14171A';
+const PANEL = '#1D2126';
+const PANEL2 = '#242930';
+const LINE = '#31373F';
+const TEXT = '#E9ECEF';
+const SUB = '#8B929B';
+const RED = '#FF4D4D';
+const ACCENT_PRESETS = [
+  { name: 'Hi-vis', value: '#C9F031' },
+  { name: 'Ember', value: '#FF6B4A' },
+  { name: 'Steel', value: '#5AA9E6' },
+  { name: 'Chalk', value: '#F2F2F2' },
+];
+const DEFAULT_SETTINGS = {
+  accentColor: '#C9F031',
+  soundIntervalBeep: true,
+  soundCountdown: true,
+  soundCompletion: true,
+  soundVolume: 0.7,
+  targetDisplay: 'both',
+  showNextPreview: true,
+  compactLabels: false,
+  keepAwake: true,
+  autoPauseOnDisconnect: false,
+  ergMode: false,
+  preferredOrientation: 'landscape', // 'landscape' | 'portrait'
+};
+
+// ---------- account / trial / billing ----------
+// Accounts, sessions, and password resets are handled for real by Supabase
+// Auth (see src/supabaseClient.js). Payments are still a placeholder \u2014 the
+// "Subscribe" button flips a flag in the database rather than charging a
+// real card. To take real payments you'd add Stripe (or Apple/Google
+// in-app purchase if you distribute through their app stores).
+const TRIAL_DAYS = 7;
+const MONTHLY_PRICE_LABEL = '$7.99 / month'; // placeholder \u2014 set your real price
+function daysLeftInTrial(trialStart) {
+  if (!trialStart) return 0;
+  const start = new Date(trialStart).getTime();
+  const elapsedDays = (Date.now() - start) / 86400000;
+  return Math.max(0, Math.ceil(TRIAL_DAYS - elapsedDays));
+}
+function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+
+const ZONE_FREE = { color: '#4B5563', name: 'Free' };
+function zoneFor(interval) {
+  if (interval.type === 'free') return { ...ZONE_FREE, intensity: 0.16 };
+  if (interval.type === 'power') {
+    const p = interval.target;
+    let z;
+    if (p <= 55) z = { color: '#4A6FA5', name: 'Recovery' };
+    else if (p <= 75) z = { color: '#4FB8A6', name: 'Endurance' };
+    else if (p <= 90) z = { color: '#8FC93A', name: 'Tempo' };
+    else if (p <= 105) z = { color: '#C9F031', name: 'Threshold' };
+    else if (p <= 120) z = { color: '#FF9F40', name: 'VO2 Max' };
+    else z = { color: '#FF4D4D', name: 'Anaerobic' };
+    return { ...z, intensity: Math.min(1.3, p / 150) };
+  }
+  const r = interval.target;
+  let z;
+  if (r <= 2) z = { color: '#4A6FA5', name: 'Recovery' };
+  else if (r <= 4) z = { color: '#4FB8A6', name: 'Endurance' };
+  else if (r <= 6) z = { color: '#8FC93A', name: 'Tempo' };
+  else if (r === 7) z = { color: '#C9F031', name: 'Threshold' };
+  else if (r <= 9) z = { color: '#FF9F40', name: 'VO2 Max' };
+  else z = { color: '#FF4D4D', name: 'Anaerobic' };
+  return { ...z, intensity: r / 10 };
+}
+
+function fmt(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+function fmtLong(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m} min`;
+}
+function formatTarget(it, ftp, mode) {
+  if (it.type === 'free') return 'Free / rest';
+  if (it.type === 'rpe') return `RPE ${it.target} / 10`;
+  const watts = Math.round((ftp * it.target) / 100);
+  if (mode === 'watts') return `${watts}W`;
+  if (mode === 'percent') return `${it.target}% FTP`;
+  return `${it.target}% FTP \u00b7 ${watts}W`;
+}
+let idCounter = 1;
+function newId() { return 'iv' + (idCounter++) + '_' + Math.random().toString(36).slice(2, 7); }
+function iv(label, duration, type, target) {
+  return { id: newId(), label, duration, type, target };
+}
+function repeatIv(count, factory) {
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(...factory(i));
+  return out;
+}
+function totalDuration(intervals) { return intervals.reduce((a, b) => a + b.duration, 0); }
+
+// ---------- smart interval scaling ----------
+// Classifies each interval so we know how it's allowed to change when the
+// workout length is adjusted: warmup/cooldown, short hard "anchor" efforts,
+// short easy "rest" blocks, or flexible steady-state "base" blocks.
+function classifyIv(it, idx, arr) {
+  const label = it.label || '';
+  if (idx === 0 && /warm/i.test(label)) return 'warmup';
+  if (idx === arr.length - 1 && /cool/i.test(label)) return 'cooldown';
+  const hardShort = it.duration <= 300 && (
+    (it.type === 'power' && it.target >= 95) ||
+    (it.type === 'rpe' && it.target >= 7)
+  );
+  if (hardShort) return 'anchor';
+  const easyShort = it.duration <= 240 && (
+    it.type === 'free' ||
+    (it.type === 'power' && it.target !== null && it.target <= 60) ||
+    (it.type === 'rpe' && it.target !== null && it.target <= 3)
+  );
+  if (easyShort) return 'rest';
+  return 'base';
+}
+
+// How far a single interval of a given class is allowed to stretch/shrink
+// before we stop touching it and use a different lever instead (more reps,
+// or an extra filler block).
+function ivBounds(cls, dur) {
+  switch (cls) {
+    case 'warmup':
+    case 'cooldown':
+      return { min: Math.max(60, Math.round(dur * 0.6)), max: Math.max(dur, 900) };
+    case 'anchor':
+      return { min: Math.max(5, Math.round(dur * 0.8)), max: Math.round(dur * 1.2) };
+    case 'rest':
+      return { min: Math.max(5, Math.round(dur * 0.6)), max: Math.round(dur * 1.6) };
+    default:
+      return { min: Math.max(60, Math.round(dur * 0.5)), max: Math.round(dur * 2.2) };
+  }
+}
+
+function ivSignature(it) { return `${it.type}|${it.target}|${it.duration}`; }
+
+// Picks out the "signature" effort of a workout so long stretches can add
+// more of it, rather than only growing one block or piling on plain
+// endurance. If the workout has a repeating set (tabata, VO2 reps, etc.)
+// that whole set is the signature. Otherwise the most intense sustained
+// block (sweet spot, threshold, etc.) is used as a template.
+// This is the ORIGINAL, default scaling behaviour \u2014 used for every
+// workout except the ones explicitly opted into "whole core" scaling below.
+function findSignatureModule(originalIntervals, classes, groups) {
+  if (groups.length > 0) {
+    let best = null;
+    for (const g of groups) {
+      const dur = totalDuration(g.items) * g.origReps;
+      if (!best || dur > best.duration) best = { duration: dur, group: g };
+    }
+    return {
+      duration: best.duration,
+      build: () => {
+        const out = [];
+        for (let r = 0; r < best.group.origReps; r++) {
+          for (const it of best.group.items) out.push({ ...it, id: newId() });
+        }
+        return out;
+      },
+    };
+  }
+  const candidates = originalIntervals
+    .map((it, idx) => ({ it, cls: classes[idx] }))
+    .filter(x => x.cls === 'base' && x.it.duration >= 180 &&
+      ((x.it.type === 'power' && x.it.target >= 80) || (x.it.type === 'rpe' && x.it.target >= 6)));
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => (b.it.target || 0) - (a.it.target || 0));
+  const template = candidates[0].it;
+  return { duration: template.duration, build: () => [{ ...template, id: newId() }] };
+}
+
+// Fills the time a workout still needs once reps/stretching are maxed out.
+// For modest amounts it's just an Endurance block. For much bigger
+// stretches, extra copies of the workout's signature set are sprinkled in
+// (roughly one more per additional hour, capped at 4) with Endurance
+// riding filling the gaps around them.
+function buildLongExtension(diff, targetSeconds, origTotal, module) {
+  const blockCap = 25 * 60;
+  const items = [];
+  let remaining = diff;
+  const extraModules = [];
+  if (module && module.duration > 0) {
+    const spacing = 60 * 60;
+    const desiredExtra = Math.min(4, Math.floor(Math.max(0, targetSeconds - origTotal) / spacing));
+    while (extraModules.length < desiredExtra && remaining > module.duration * 0.9) {
+      extraModules.push(module.build());
+      remaining -= module.duration;
+    }
+  }
+  if (extraModules.length === 0) {
+    while (remaining > 60) {
+      const d = Math.min(blockCap, remaining);
+      items.push(iv('Endurance', Math.round(d), 'power', 68));
+      remaining -= d;
+    }
+    return items;
+  }
+  const gaps = extraModules.length + 1;
+  const perGap = remaining / gaps;
+  for (let g = 0; g < gaps; g++) {
+    let gapRemaining = perGap;
+    while (gapRemaining > 60) {
+      const d = Math.min(blockCap, gapRemaining);
+      items.push(iv('Endurance', Math.round(d), 'power', 68));
+      gapRemaining -= d;
+    }
+    if (g < extraModules.length) items.push(...extraModules[g]);
+  }
+  return items;
+}
+
+// OPT-IN ONLY (workout.repeatWholeCore === true, currently just Rolling
+// endurance): everything between the warm up and cool down, so a rolling
+// wave of effort can be repeated as a WHOLE extra lap rather than one
+// block being stretched thin. Only ever adds a lap when there's a FULL
+// lap's worth of extra time available, so it can never overshoot the
+// target length \u2014 the normal stretch/filler system above still handles
+// every workout that hasn't opted in, and handles any leftover time here.
+function findCoreModule(originalIntervals, classes) {
+  const n = originalIntervals.length;
+  if (n === 0) return null;
+  let start = 0, end = n;
+  if (classes[0] === 'warmup') start = 1;
+  if (classes[n - 1] === 'cooldown') end = n - 1;
+  if (start >= end) return null;
+  const coreItems = originalIntervals.slice(start, end);
+  const duration = totalDuration(coreItems);
+  if (duration <= 0) return null;
+  return { duration, build: () => coreItems.map(it => ({ ...it, id: newId() })) };
+}
+
+
+// Finds back-to-back repeating blocks, e.g. 5x[VO2, Recovery], so extra
+// time can be filled by adding whole reps instead of stretching each one.
+function findRepeatGroups(intervals) {
+  const n = intervals.length;
+  const groups = [];
+  let i = 0;
+  while (i < n) {
+    let bestLen = 0, bestUnit = 0, bestReps = 0;
+    const maxUnit = Math.min(3, Math.floor((n - i) / 2));
+    for (let unit = 1; unit <= maxUnit; unit++) {
+      const sig = intervals.slice(i, i + unit).map(ivSignature).join(',');
+      let reps = 1;
+      while (i + (reps + 1) * unit <= n) {
+        const nextSig = intervals.slice(i + reps * unit, i + (reps + 1) * unit).map(ivSignature).join(',');
+        if (nextSig === sig) reps++; else break;
+      }
+      if (reps >= 2 && reps * unit > bestLen) { bestLen = reps * unit; bestUnit = unit; bestReps = reps; }
+    }
+    if (bestUnit > 0) {
+      groups.push({ start: i, unit: bestUnit, origReps: bestReps, reps: bestReps, items: intervals.slice(i, i + bestUnit) });
+      i += bestLen;
+    } else {
+      i += 1;
+    }
+  }
+  return groups;
+}
+
+// Rebuilds the final interval list: expands/contracts each repeat group to
+// its (possibly adjusted) rep count, keeps standalone intervals at their
+// (possibly adjusted) duration, and drops in any filler blocks before a
+// trailing cooldown.
+function assembleScaled(originalIntervals, classes, groups, inGroup, durations, fillers) {
+  const n = originalIntervals.length;
+  const result = [];
+  let i = 0;
+  while (i < n) {
+    const gi = inGroup[i];
+    if (gi >= 0 && groups[gi].start === i) {
+      const g = groups[gi];
+      for (let r = 0; r < g.reps; r++) {
+        for (let u = 0; u < g.unit; u++) {
+          const srcIdx = g.start + u;
+          result.push({ ...originalIntervals[srcIdx], id: newId(), duration: Math.max(5, Math.round(durations[srcIdx])) });
+        }
+      }
+      i += g.unit * g.origReps;
+    } else {
+      result.push({ ...originalIntervals[i], duration: Math.max(5, Math.round(durations[i])) });
+      i += 1;
+    }
+  }
+  if (fillers.length > 0) {
+    const lastIsCooldown = classes[n - 1] === 'cooldown';
+    if (lastIsCooldown && result.length > 0) {
+      const tail = result.pop();
+      result.push(...fillers, tail);
+    } else {
+      result.push(...fillers);
+    }
+  }
+  return result;
+}
+
+// Scales a workout to a target duration without just stretching every
+// interval by the same factor. Order of preference when growing:
+//  1. Add or remove whole reps of any literal repeating block (keeps each
+//     rep's length close to the original, just does more/fewer of them).
+//  2. For workouts that opt in (repeatWholeCore, currently just Rolling
+//     endurance) with no literal repeating block: add whole extra laps of
+//     the workout's "core" \u2014 everything between warm up and cool down \u2014
+//     but only when there's a FULL lap's worth of extra time, so this can
+//     never overshoot the target length.
+//  3. Stretch or shrink flexible steady-state blocks (warmup, cooldown,
+//     endurance/tempo/sweet-spot blocks) within a sane range to fine-tune.
+//  4. If more time is still needed, sprinkle in the workout's signature
+//     effort (or Endurance riding) rather than stretching anything
+//     unreasonably far. This is the original system and is what every
+//     workout other than Rolling endurance still uses.
+//  5. If less time is still needed, fall back to trimming short hard/easy
+//     blocks that aren't part of a repeating group.
+function smartScaleWorkout(originalIntervals, targetSeconds, repeatWholeCore) {
+  const n = originalIntervals.length;
+  const origTotal = totalDuration(originalIntervals);
+  if (n === 0 || Math.abs(targetSeconds - origTotal) < 5) {
+    return originalIntervals.map(it => ({ ...it }));
+  }
+
+  const classes = originalIntervals.map((it, idx) => classifyIv(it, idx, originalIntervals));
+  const groups = findRepeatGroups(originalIntervals);
+  const inGroup = new Array(n).fill(-1);
+  groups.forEach((g, gi) => { for (let k = g.start; k < g.start + g.unit * g.origReps; k++) inGroup[k] = gi; });
+
+  const durations = originalIntervals.map(it => it.duration);
+  let diff = targetSeconds - origTotal;
+
+  function flexibleIndices(clsList) {
+    return originalIntervals.map((_, idx) => idx)
+      .filter(idx => inGroup[idx] === -1 && clsList.includes(classes[idx]));
+  }
+
+  if (diff > 0) {
+    // 1) add whole reps to existing repeat groups
+    for (const g of groups) {
+      const unitDur = totalDuration(g.items);
+      if (unitDur <= 0) continue;
+      const maxReps = Math.min(Math.ceil(g.origReps * 1.5), g.origReps + 3);
+      while (diff > unitDur * 0.5 && g.reps < maxReps) {
+        g.reps += 1;
+        diff -= unitDur;
+      }
+    }
+    // 1b) opt-in only: add whole extra laps of the core pattern, but only
+    //     when a full lap's worth of time is available, so it can't overshoot
+    let addedModules = [];
+    if (repeatWholeCore && groups.length === 0) {
+      const module = findCoreModule(originalIntervals, classes);
+      if (module && module.duration > 0) {
+        const maxAdd = 4;
+        while (diff >= module.duration && addedModules.length < maxAdd) {
+          addedModules.push(module.build());
+          diff -= module.duration;
+        }
+      }
+    }
+    // 2) stretch flexible standalone blocks up to their caps
+    let flexIdx = flexibleIndices(['base', 'warmup', 'cooldown']);
+    if (diff > 0 && flexIdx.length > 0) {
+      const room = flexIdx.map(idx => ivBounds(classes[idx], durations[idx]).max - durations[idx]);
+      const totalRoom = room.reduce((a, b) => a + b, 0);
+      if (totalRoom > 0) {
+        const use = Math.min(diff, totalRoom);
+        flexIdx.forEach((idx, k) => { durations[idx] += (room[k] / totalRoom) * use; });
+        diff -= use;
+      }
+    }
+    // 3) still need more time: sprinkle in the signature set (if the
+    //    stretch is big enough to warrant it) plus Endurance riding \u2014 the
+    //    original system, unchanged, plus any laps added in step 1b
+    const fillers = addedModules.reduce((acc, m) => acc.concat(m), []);
+    if (diff > 60) {
+      const module = findSignatureModule(originalIntervals, classes, groups);
+      fillers.push(...buildLongExtension(diff, targetSeconds, origTotal, module));
+    }
+    if (fillers.length > 0) {
+      return assembleScaled(originalIntervals, classes, groups, inGroup, durations, fillers);
+    }
+  } else if (diff < 0) {
+    let need = -diff;
+    // 1) remove whole reps from the biggest repeat groups first, floor at 1 rep
+    let safety = 0;
+    while (need > 0 && safety < 500) {
+      safety++;
+      const candidates = groups.filter(g => g.reps > 1);
+      if (candidates.length === 0) break;
+      candidates.sort((a, b) => b.reps - a.reps);
+      const g = candidates[0];
+      const unitDur = totalDuration(g.items);
+      if (unitDur <= 0) break;
+      g.reps -= 1;
+      need -= unitDur;
+    }
+    // 2) shrink flexible standalone blocks down to their floors
+    let flexIdx = flexibleIndices(['base', 'warmup', 'cooldown']);
+    if (need > 0 && flexIdx.length > 0) {
+      const room = flexIdx.map(idx => Math.max(0, durations[idx] - ivBounds(classes[idx], durations[idx]).min));
+      const totalRoom = room.reduce((a, b) => a + b, 0);
+      if (totalRoom > 0) {
+        const use = Math.min(need, totalRoom);
+        flexIdx.forEach((idx, k) => { durations[idx] -= (room[k] / totalRoom) * use; });
+        need -= use;
+      }
+    }
+    // 3) last resort: trim standalone hard/easy blocks that aren't in a group
+    let otherIdx = flexibleIndices(['anchor', 'rest']);
+    if (need > 0 && otherIdx.length > 0) {
+      const room = otherIdx.map(idx => Math.max(0, durations[idx] - ivBounds(classes[idx], durations[idx]).min));
+      const totalRoom = room.reduce((a, b) => a + b, 0);
+      if (totalRoom > 0) {
+        const use = Math.min(need, totalRoom);
+        otherIdx.forEach((idx, k) => { durations[idx] -= (room[k] / totalRoom) * use; });
+        need -= use;
+      }
+    }
+  }
+
+  return assembleScaled(originalIntervals, classes, groups, inGroup, durations, []);
+}
+
+// ---------- preloaded library ----------
+const LIBRARY = [
+  {
+    id: 'endurance-hour', name: 'Steady endurance hour', category: 'Basics',
+    description: 'Long steady aerobic ride to build your base.',
+    intervals: [iv('Warm up', 300, 'power', 55), iv('Endurance', 2400, 'power', 68), iv('Cool down', 300, 'power', 50)],
+  },
+  {
+    id: 'rolling-endurance', name: 'Rolling endurance', category: 'Basics',
+    description: 'Steady aerobic ride that rolls gently up and down like rolling terrain, 55\u201375% FTP.',
+    repeatWholeCore: true,
+    intervals: [
+      iv('Warm up', 300, 'power', 55),
+      iv('Roll up', 600, 'power', 62),
+      iv('Roll up', 600, 'power', 70),
+      iv('Rolling peak', 600, 'power', 75),
+      iv('Roll down', 600, 'power', 66),
+      iv('Roll down', 600, 'power', 58),
+      iv('Roll up', 600, 'power', 68),
+      iv('Cool down', 300, 'power', 50),
+    ],
+  },
+  {
+    id: 'sweet-spot-builder', name: 'Sweet spot builder', category: 'Basics',
+    description: 'Two sweet spot blocks either side of a short recovery.',
+    intervals: [iv('Warm up', 480, 'power', 60), iv('Sweet spot', 720, 'power', 90), iv('Recovery', 300, 'power', 55), iv('Sweet spot', 720, 'power', 92), iv('Cool down', 360, 'power', 50)],
+  },
+  {
+    id: 'threshold-2x20', name: 'Threshold 2\u00d720', category: 'Basics',
+    description: 'Classic two 20 minute blocks at threshold power.',
+    intervals: [iv('Warm up', 600, 'power', 60), iv('Threshold', 1200, 'power', 98), iv('Recovery', 480, 'power', 55), iv('Threshold', 1200, 'power', 100), iv('Cool down', 480, 'power', 50)],
+  },
+  {
+    id: 'vo2-5x3', name: 'VO2 max 5\u00d73', category: 'Basics',
+    description: 'Five 3 minute VO2 efforts with equal recovery.',
+    intervals: [iv('Warm up', 600, 'power', 60), ...repeatIv(5, () => [iv('VO2 max', 180, 'power', 115), iv('Recovery', 180, 'power', 55)]), iv('Cool down', 480, 'power', 50)],
+  },
+  {
+    id: 'tabata-torch', name: 'Tabata torch', category: 'Basics',
+    description: 'Eight all-out 20 second bursts with short rests.',
+    intervals: [iv('Warm up', 480, 'power', 60), ...repeatIv(8, () => [iv('Sprint', 20, 'rpe', 10), iv('Rest', 10, 'free', null)]), iv('Cool down', 480, 'power', 50)],
+  },
+  {
+    id: 'over-unders', name: 'Over-unders 4\u00d74', category: 'Basics',
+    description: 'Alternating above and below threshold to teach pacing.',
+    intervals: [iv('Warm up', 600, 'power', 60), ...repeatIv(4, () => [iv('Over', 120, 'power', 105), iv('Under', 120, 'power', 90)]), iv('Cool down', 480, 'power', 50)],
+  },
+  {
+    id: 'rpe-fartlek', name: 'RPE fartlek', category: 'Basics',
+    description: 'No power meter needed \u2014 ride by feel.',
+    intervals: [iv('Easy spin', 300, 'rpe', 3), iv('Build', 180, 'rpe', 6), iv('Push', 120, 'rpe', 8), iv('Recover', 120, 'free', null), iv('Hard', 240, 'rpe', 7), iv('Sprint', 60, 'rpe', 9), iv('Easy', 300, 'rpe', 3), iv('Cool down', 300, 'rpe', 2)],
+  },
+  {
+    id: 'recovery-spin', name: 'Recovery spin', category: 'Basics',
+    description: 'Light and easy \u2014 flush the legs, nothing more.',
+    intervals: [iv('Keep it light', 1800, 'power', 50)],
+  },
+  {
+    id: 'pyramid-power', name: 'Pyramid power', category: 'Basics',
+    description: 'Step up through the zones, then step back down.',
+    intervals: [iv('Warm up', 300, 'power', 55), iv('Step 1', 180, 'power', 60), iv('Step 2', 180, 'power', 70), iv('Step 3', 180, 'power', 80), iv('Step 4', 180, 'power', 90), iv('Peak', 180, 'power', 100), iv('Step 4', 180, 'power', 90), iv('Step 3', 180, 'power', 80), iv('Step 2', 180, 'power', 70), iv('Step 1', 180, 'power', 60), iv('Cool down', 300, 'power', 50)],
+  },
+  {
+    id: 'mixed-metric', name: 'Mixed metric session', category: 'Basics',
+    description: 'Power, RPE and free riding in one workout.',
+    intervals: [iv('Warm up', 480, 'power', 60), iv('Sweet spot', 600, 'power', 90), iv('Ride how you feel', 300, 'free', null), iv('Hard effort', 240, 'rpe', 8), iv('Sprint', 30, 'rpe', 10), iv('Recovery', 90, 'free', null), iv('Endurance', 600, 'power', 70), iv('Cool down', 360, 'power', 50)],
+  },
+  {
+    id: 'ftp-test-20', name: '20 minute FTP test', category: 'Basics',
+    description: 'The standard test protocol for finding your current FTP.',
+    notes: 'After the 20 minute effort, take your average power for that block and multiply by 0.95. That number is your new FTP \u2014 update it in Settings.',
+    fixedLength: true,
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
+      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
+      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
+      iv('Easy spin', 300, 'power', 50),
+      iv('Primer effort', 300, 'rpe', 9),
+      iv('Recovery', 600, 'power', 50),
+      iv('20 minute test', 1200, 'rpe', 10),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ramp-ftp-test', name: 'Ramp FTP test', category: 'Basics',
+    description: 'Power climbs a little every minute until you can\u2019t hold it \u2014 no long steady effort needed.',
+    notes: 'Ride until you can no longer hold the target power. If a trainer is connected, the app will notice when you fall off the pace and end the test for you automatically, then estimate your FTP. Without a trainer connected, stop yourself, find the last full minute you completed, take its power, and multiply by 0.75 \u2014 that\u2019s your new FTP, update it in Settings.',
+    autoStopTest: true,
+    ftpMultiplier: 0.75,
+    fixedLength: true,
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      ...Array.from({ length: 21 }, (_, i) => iv(i === 20 ? 'Max effort' : 'Ramp step', 60, 'power', 50 + i * 5)),
+      iv('Cool down', 300, 'power', 50),
+    ],
+  },
+  {
+    id: 'vo2-40-20-double', name: 'VO2 max 40/20 \u00d7 13 (2 sets)', category: 'Basics',
+    description: 'Two sets of thirteen short, sharp 40-second VO2 max efforts with 20 seconds off, separated by a proper recovery block.',
+    notes: 'A hard, focused VO2 max session. The 40-second efforts should feel like you couldn\u2019t hold them much past a minute \u2014 the 20 seconds off is just enough to keep the legs turning before the next one.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      ...repeatIv(13, () => [iv('On', 40, 'power', 120), iv('Off', 20, 'power', 50)]),
+      iv('Between sets recovery', 300, 'power', 55),
+      ...repeatIv(13, () => [iv('On', 40, 'power', 120), iv('Off', 20, 'power', 50)]),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  // ---------- Rides: long, mixed-terrain, real-world-feel sessions (90 min\u20135 hr) ----------
+  {
+    id: 'ride-sunday-club', name: 'Sunday Club Run', category: 'Rides',
+    description: 'A social group ride with regroups, a village climb, a coffee stop and a cheeky sprint for the sign.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Neutral rollout', 600, 'power', 60),
+      ...repeatIv(5, () => [iv('Regroup', 300, 'power', 60), iv('Surge', 120, 'power', 95)]),
+      iv('Village climb', 480, 'power', 85),
+      iv('Descent', 240, 'power', 50),
+      iv('Coffee stop', 300, 'power', 45),
+      ...repeatIv(4, () => [iv('Chaingang pull', 120, 'power', 88), iv('Drift back', 90, 'power', 65)]),
+      iv('Sprint for the sign', 45, 'rpe', 10),
+      iv('Easy spin', 300, 'power', 58),
+      iv('Cool down', 480, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-chaingang', name: 'Chaingang Special', category: 'Rides',
+    description: 'Fast, tight rotating pacelines with no let-up \u2014 take your turn on the front and hang on in the line.',
+    intervals: [
+      iv('Warm up', 480, 'power', 55),
+      iv('Build', 300, 'power', 70),
+      ...repeatIv(8, () => [iv('On the front', 90, 'power', 105), iv('Recover in line', 60, 'power', 65)]),
+      iv('Attack surge', 60, 'rpe', 9),
+      iv('Regroup', 120, 'power', 58),
+      ...repeatIv(6, () => [iv('On the front', 75, 'power', 108), iv('Recover in line', 60, 'power', 65)]),
+      ...repeatIv(6, () => [iv('On the front', 90, 'power', 106), iv('Recover in line', 60, 'power', 65)]),
+      iv('Group tempo', 360, 'power', 80),
+      iv('Reform', 180, 'power', 75),
+      iv('Hard final lap', 300, 'power', 100),
+      iv('Sprint', 30, 'rpe', 10),
+      iv('Cool down', 660, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-century-sim', name: 'Century Simulation', category: 'Rides',
+    description: 'The full arc of a 100-mile day \u2014 long steady miles, two rest stops, a headwind slog and a final climb before home.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Settle in', 2400, 'power', 68),
+      iv('Rest stop', 480, 'power', 45),
+      ...repeatIv(6, () => [iv('Roll up', 240, 'power', 78), iv('Roll down', 180, 'power', 62)]),
+      iv('Endurance cruise', 2100, 'power', 70),
+      iv('Rest stop', 480, 'power', 45),
+      iv('Headwind grind', 1200, 'power', 75),
+      iv('Tailwind recovery', 600, 'power', 58),
+      iv('Steady tempo', 1500, 'power', 80),
+      iv('Final climb', 720, 'power', 88),
+      iv('Descent', 360, 'power', 50),
+      iv('Sprint for the town sign', 30, 'rpe', 9),
+      iv('Home stretch', 1200, 'power', 68),
+      iv('Cool down', 750, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-coastal-rollers', name: 'Coastal Rollers', category: 'Rides',
+    description: 'A rolling coast road, a stiff headwind stretch, a sprint into a beach town, and a cliff climb to finish.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      ...repeatIv(8, () => [iv('Roll up', 210, 'power', 82), iv('Roll down', 150, 'power', 60)]),
+      iv('Headwind coastal stretch', 900, 'power', 78),
+      iv('Tailwind push', 480, 'power', 62),
+      iv('Beach town sprint', 30, 'rpe', 9),
+      iv('Easy coastal cruise', 1200, 'power', 65),
+      ...repeatIv(6, () => [iv('Roll up', 180, 'power', 85), iv('Roll down', 120, 'power', 58)]),
+      iv('Cliff climb', 600, 'power', 90),
+      iv('Descent', 360, 'power', 50),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-alpine-ascent', name: 'Alpine Ascent', category: 'Rides',
+    description: 'One long mountain up-and-over \u2014 valley approach, switchback surges, a sweet spot mid-section, hairpin kicks and a summit push.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Valley approach', 1800, 'power', 68),
+      iv('Lower slopes', 1200, 'power', 80),
+      ...repeatIv(6, () => [iv('Switchback surge', 120, 'power', 100), iv('Steady climb', 180, 'power', 85)]),
+      iv('Mid climb sweet spot', 1200, 'power', 90),
+      ...repeatIv(4, () => [iv('Hairpin surge', 90, 'power', 105), iv('Recover', 120, 'power', 75)]),
+      iv('Summit push', 600, 'power', 98),
+      iv('Summit sprint', 30, 'rpe', 10),
+      iv('Descent', 1500, 'power', 50),
+      iv('Valley cool cruise', 1200, 'power', 65),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-gravel-grinder', name: 'Gravel Grinder', category: 'Rides',
+    description: 'Fire roads, punchy climbs, a sandy sector, doubletrack rollers and a long grind to the finish gate.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      iv('Fire road endurance', 1800, 'power', 68),
+      ...repeatIv(5, () => [iv('Punchy climb', 120, 'power', 95), iv('Recover', 120, 'power', 62)]),
+      iv('Sandy sector', 480, 'power', 62),
+      iv('Gravel grind tempo', 1500, 'power', 82),
+      iv('Creek crossing', 180, 'power', 55),
+      ...repeatIv(6, () => [iv('Doubletrack up', 180, 'power', 85), iv('Doubletrack down', 120, 'power', 60)]),
+      iv('Long grind sweet spot', 1500, 'power', 90),
+      iv('Singletrack', 900, 'rpe', 6),
+      iv('Recovery spin', 900, 'power', 62),
+      iv('Final gravel climb', 600, 'power', 95),
+      iv('Descent', 480, 'power', 50),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-crosswind-echelon', name: 'Crosswind Echelon', category: 'Rides',
+    description: 'A gusty exposed road \u2014 rotate through the echelon, hold the wheel, and don\u2019t get gapped when it splits.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      iv('Build', 480, 'power', 70),
+      ...repeatIv(8, () => [iv('Front in the wind', 90, 'power', 100), iv('Sheltered', 90, 'power', 68)]),
+      iv('Regroup', 300, 'power', 58),
+      ...repeatIv(6, () => [iv('Front in the wind', 90, 'power', 103), iv('Sheltered', 90, 'power', 68)]),
+      iv('Crosswind straight', 900, 'power', 85),
+      iv('Gap chase', 180, 'power', 105),
+      iv('Recover', 240, 'power', 65),
+      ...repeatIv(5, () => [iv('Front in the wind', 75, 'power', 100), iv('Sheltered', 75, 'power', 68)]),
+      iv('Sprint', 30, 'rpe', 10),
+      iv('Cool down', 540, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-breakaway-glory', name: 'Breakaway to Glory', category: 'Rides',
+    description: 'You go off the front and try to make it stick \u2014 the drama of an escape, a chase, a counter, and a photo finish.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      iv('Group tempo', 900, 'power', 78),
+      iv('The attack goes', 120, 'power', 110),
+      iv('Solo effort', 900, 'power', 92),
+      ...repeatIv(4, () => [iv('Chase pressure surge', 90, 'power', 105), iv('Steady', 120, 'power', 88)]),
+      iv('Solo grind', 900, 'power', 98),
+      iv('Dig deep', 300, 'power', 112),
+      iv('Caught \u2014 recover', 360, 'power', 60),
+      iv('Regroup tempo', 600, 'power', 78),
+      iv('Counter attack', 90, 'power', 115),
+      iv('Solo again', 900, 'power', 95),
+      iv('Final sprint for the line', 30, 'rpe', 10),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-audax-200', name: 'Audax 200 Pace', category: 'Rides',
+    description: 'Ultra-distance brevet pacing \u2014 patient, metronomic, with two control-point stops. Nothing flashy, just steady miles.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Long steady endurance', 4200, 'power', 65),
+      iv('Control point', 600, 'power', 45),
+      iv('Steady endurance', 3300, 'power', 66),
+      ...repeatIv(8, () => [iv('Roll up', 240, 'power', 75), iv('Roll down', 180, 'power', 60)]),
+      iv('Control point', 600, 'power', 45),
+      iv('Steady endurance', 2400, 'power', 65),
+      iv('Headwind grind', 1200, 'power', 72),
+      iv('Final steady push', 1200, 'power', 68),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-crit-sim', name: 'Criterium Simulation', category: 'Rides',
+    description: 'Short, sharp, and relentless \u2014 hard accelerations out of every corner with barely a moment to recover.',
+    intervals: [
+      iv('Warm up', 600, 'power', 60),
+      iv('Neutral lap', 180, 'power', 65),
+      iv('Race start surge', 60, 'power', 110),
+      ...repeatIv(10, () => [iv('Accel out of the corner', 30, 'power', 115), iv('Straight recover', 60, 'power', 72)]),
+      iv('Race pace tempo', 1200, 'power', 85),
+      iv('Mid-race attack', 60, 'power', 112),
+      iv('Chase', 180, 'power', 95),
+      ...repeatIv(8, () => [iv('Accel out of the corner', 30, 'power', 116), iv('Straight recover', 60, 'power', 72)]),
+      ...repeatIv(8, () => [iv('Accel out of the corner', 30, 'power', 118), iv('Straight recover', 60, 'power', 72)]),
+      iv('Bell lap surge', 120, 'power', 105),
+      iv('Sprint finish', 30, 'rpe', 10),
+      iv('Cool down', 630, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-cafe-ride', name: 'Café Ride', category: 'Rides',
+    description: 'Easy chat pace, a proper coffee stop, one climb to keep everyone honest, and a fun sprint for the town sign.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Chatty pace', 1200, 'power', 58),
+      iv('Easy endurance', 1500, 'power', 62),
+      iv('Regroup climb', 300, 'power', 78),
+      iv('Café stop', 900, 'power', 45),
+      iv('Easy spin home', 1200, 'power', 60),
+      iv('Playful sprint for fun', 30, 'rpe', 9),
+      ...repeatIv(4, () => [iv('Roll up', 120, 'power', 75), iv('Roll down', 120, 'power', 58)]),
+      iv('Cool down', 480, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-cobbled-classics', name: 'Cobbled Classics', category: 'Rides',
+    description: 'A brutal spring-classics profile \u2014 three escalating pav\u00e9 sectors, a cobbled climb, and a solo dash to the velodrome.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Approach tempo', 1200, 'power', 78),
+      ...repeatIv(6, () => [iv('Pav\u00e9 push', 90, 'power', 100), iv('Smooth recover', 60, 'power', 70)]),
+      iv('Regroup', 300, 'power', 58),
+      ...repeatIv(8, () => [iv('Pav\u00e9 push', 120, 'power', 102), iv('Smooth recover', 90, 'power', 70)]),
+      iv('Cobbled climb', 360, 'power', 95),
+      iv('Descent', 480, 'power', 50),
+      ...repeatIv(10, () => [iv('Pav\u00e9 push', 60, 'power', 105), iv('Smooth recover', 60, 'power', 68)]),
+      iv('Chase group tempo', 1200, 'power', 85),
+      ...repeatIv(6, () => [iv('Pav\u00e9 push', 90, 'power', 103), iv('Smooth recover', 60, 'power', 70)]),
+      iv('Solo finish', 600, 'power', 98),
+      iv('Sprint at the velodrome', 30, 'rpe', 10),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-group-surges', name: 'Group Ride Surges', category: 'Rides',
+    description: 'Someone in the group keeps attacking for fun \u2014 repeated surges you have to cover, then settle, then cover again.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      iv('Neutral', 600, 'power', 62),
+      ...repeatIv(6, () => [iv('Surge from the group', 120, 'power', 100), iv('Settle back', 180, 'power', 70)]),
+      iv('Regroup climb', 360, 'power', 85),
+      iv('Descent', 300, 'power', 50),
+      ...repeatIv(5, () => [iv('Surge from the group', 120, 'power', 102), iv('Settle back', 180, 'power', 70)]),
+      iv('Sprint for the county line', 30, 'rpe', 10),
+      iv('Easy spin', 480, 'power', 60),
+      iv('Cool down', 330, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-hilly-fondo', name: 'Hilly Gran Fondo', category: 'Rides',
+    description: 'Three categorized climbs of increasing size, with rolling valley roads and feed zones stitched between them.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Approach endurance', 1800, 'power', 68),
+      iv('Climb 1 \u2014 Cat 3', 900, 'power', 90),
+      iv('Summit surge', 60, 'power', 105),
+      iv('Descent', 600, 'power', 50),
+      ...repeatIv(6, () => [iv('Roll up', 180, 'power', 78), iv('Roll down', 120, 'power', 60)]),
+      ...repeatIv(4, () => [iv('Climb 2 surge', 60, 'power', 108), iv('Climb 2 steady', 180, 'power', 88)]),
+      iv('Descent', 720, 'power', 50),
+      iv('Feed zone', 480, 'power', 45),
+      iv('Endurance cruise', 1500, 'power', 68),
+      iv('Climb 3 \u2014 the big one', 1500, 'power', 88),
+      iv('Summit push', 180, 'power', 102),
+      iv('Descent', 900, 'power', 50),
+      ...repeatIv(5, () => [iv('Roll up', 120, 'power', 80), iv('Roll down', 120, 'power', 62)]),
+      iv('Sprint for the line', 30, 'rpe', 10),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-tt-tuneup', name: 'Flat TT Tune-Up', category: 'Rides',
+    description: 'A long ride built around three time-trial efforts, with generous recovery spins between each one.',
+    intervals: [
+      iv('Warm up', 600, 'power', 58),
+      iv('Endurance', 1200, 'power', 68),
+      iv('TT effort 1', 600, 'power', 100),
+      iv('Recovery spin', 480, 'power', 62),
+      iv('TT effort 2', 600, 'power', 102),
+      iv('Recovery spin', 480, 'power', 62),
+      iv('TT effort 3', 300, 'power', 106),
+      iv('Recovery', 600, 'power', 65),
+      iv('Endurance cruise', 1800, 'power', 70),
+      iv('Group tempo', 900, 'power', 82),
+      iv('Sprint', 30, 'rpe', 10),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-rainy-survival', name: 'Rainy Day Survival', category: 'Rides',
+    description: 'Grim conditions, careful pacing, occasional puddle-dodging surges, and a hard push in the final stretch to get home and dry.',
+    intervals: [
+      iv('Warm up', 480, 'power', 55),
+      iv('Steady grind', 1800, 'power', 70),
+      ...repeatIv(4, () => [iv('Puddle dodge surge', 60, 'power', 92), iv('Steady', 120, 'power', 68)]),
+      iv('Steady endurance', 1200, 'power', 68),
+      iv('Push to get home', 600, 'power', 85),
+      iv('Sprint to shelter', 30, 'rpe', 9),
+      iv('Cool down', 570, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-night-steady', name: 'Night Ride Steady', category: 'Rides',
+    description: 'Smooth, consistent effort under headlights \u2014 a careful climb, a cautious descent, and a small group keeping each other honest.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Smooth steady endurance', 2400, 'power', 68),
+      iv('Careful climb', 900, 'power', 78),
+      iv('Descent', 600, 'power', 50),
+      iv('Steady cruise', 1800, 'power', 68),
+      ...repeatIv(4, () => [iv('Small group surge', 90, 'power', 92), iv('Steady', 120, 'power', 68)]),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-everesting-lite', name: 'Everesting Lite', category: 'Rides',
+    description: 'Same hill, again and again \u2014 twelve reps of climb-and-descend with a feed stop halfway through.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      ...repeatIv(8, () => [iv('Climb the hill', 480, 'power', 92), iv('Descend and recover', 240, 'power', 60)]),
+      iv('Feed stop', 600, 'power', 45),
+      ...repeatIv(4, () => [iv('Climb the hill', 480, 'power', 95), iv('Descend and recover', 240, 'power', 60)]),
+      iv('Endurance cruise', 1200, 'power', 68),
+      iv('Final climb push', 600, 'power', 100),
+      iv('Descent', 480, 'power', 50),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-breakaway-stage', name: 'Breakaway Stage Day', category: 'Rides',
+    description: 'A full stage-race narrative \u2014 an early move that holds most of the day, a crosswind scare, and a bunch gallop at the line.',
+    intervals: [
+      iv('Warm up', 720, 'power', 56),
+      iv('Neutral rollout', 480, 'power', 62),
+      iv('Settle endurance', 1500, 'power', 68),
+      iv('The attack goes', 120, 'power', 112),
+      iv('Solo effort', 1500, 'power', 90),
+      iv('Gap holds', 1800, 'power', 85),
+      ...repeatIv(5, () => [iv('Chase pressure surge', 90, 'power', 105), iv('Steady', 150, 'power', 88)]),
+      iv('Solo threshold grind', 1200, 'power', 98),
+      iv('Crosswind chaos', 600, 'power', 68),
+      iv('Caught by the peloton', 480, 'power', 70),
+      iv('Bunch endurance', 900, 'power', 70),
+      iv('Lead-out tempo', 600, 'power', 88),
+      iv('Final sprint', 30, 'rpe', 10),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-monument-classics', name: 'Spring Classics Monument', category: 'Rides',
+    description: 'The hardest one-day race on the calendar \u2014 three escalating pav\u00e9 sectors, a run of steep bergs, and a selection made in the final hour.',
+    intervals: [
+      iv('Warm up', 900, 'power', 55),
+      iv('Approach endurance', 2400, 'power', 68),
+      iv('Early break tempo', 1200, 'power', 80),
+      ...repeatIv(6, () => [iv('Pav\u00e9 push', 90, 'power', 100), iv('Recover', 60, 'power', 70)]),
+      ...repeatIv(6, () => [iv('Roll up', 180, 'power', 80), iv('Roll down', 120, 'power', 60)]),
+      iv('Feed zone', 480, 'power', 45),
+      ...repeatIv(8, () => [iv('Pav\u00e9 push', 120, 'power', 103), iv('Recover', 90, 'power', 70)]),
+      ...repeatIv(5, () => [iv('Berg climb', 90, 'power', 108), iv('Descend', 60, 'power', 62)]),
+      iv('Endurance regroup', 1500, 'power', 68),
+      ...repeatIv(8, () => [iv('Pav\u00e9 push', 120, 'power', 105), iv('Recover', 90, 'power', 70)]),
+      iv('Selection made \u2014 threshold grind', 1200, 'power', 98),
+      iv('Chase group tempo', 900, 'power', 85),
+      iv('Final berg climb', 300, 'power', 105),
+      iv('Sprint finish', 30, 'rpe', 10),
+      iv('Cool down', 900, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-bikepacking-haul', name: 'Bikepacking Long Haul', category: 'Rides',
+    description: 'A loaded, all-day ultra-distance ride \u2014 lower power to account for the gear, gravel sections, and two proper rest stops.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Loaded steady endurance', 3600, 'power', 62),
+      iv('Gravel section endurance', 2400, 'power', 65),
+      iv('Climb with gear', 900, 'power', 78),
+      iv('Descent \u2014 careful', 600, 'power', 48),
+      iv('Rest stop', 900, 'power', 45),
+      iv('Steady endurance', 3000, 'power', 63),
+      iv('Headwind grind', 1500, 'power', 70),
+      iv('Rest stop', 600, 'power', 45),
+      iv('Steady endurance', 2400, 'power', 64),
+      iv('Final push \u2014 tired legs', 900, 'power', 72),
+      iv('Cool down', 780, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-mountain-double', name: 'Mountain Pass Double', category: 'Rides',
+    description: 'Two big climbs in one day, with a valley recovery between them and a long cruise home after the second descent.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Valley approach', 2100, 'power', 68),
+      iv('Climb 1', 1500, 'power', 90),
+      iv('Summit 1 surge', 60, 'power', 105),
+      iv('Descent 1', 900, 'power', 50),
+      iv('Valley recovery', 900, 'power', 65),
+      iv('Climb 2', 1800, 'power', 91),
+      ...repeatIv(4, () => [iv('Steep pitch surge', 90, 'power', 108), iv('Steady', 150, 'power', 86)]),
+      iv('Summit 2 push', 300, 'power', 100),
+      iv('Descent 2', 1200, 'power', 50),
+      iv('Valley cruise home', 2100, 'power', 68),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-urban-commute', name: 'Urban Commute Intervals', category: 'Rides',
+    description: 'Stop-and-go city riding \u2014 sprints away from every light, a bridge climb, and a park path to catch your breath.',
+    intervals: [
+      iv('Warm up', 480, 'power', 58),
+      ...repeatIv(10, () => [iv('Sprint from the light', 30, 'power', 110), iv('Coast to the next light', 60, 'power', 48)]),
+      iv('Bike lane tempo', 600, 'power', 82),
+      ...repeatIv(10, () => [iv('Sprint from the light', 30, 'power', 112), iv('Coast to the next light', 60, 'power', 48)]),
+      iv('Park path endurance', 900, 'power', 68),
+      iv('Steep bridge climb', 180, 'power', 95),
+      iv('Descent', 180, 'power', 50),
+      ...repeatIv(8, () => [iv('Sprint from the light', 30, 'power', 115), iv('Coast to the next light', 60, 'power', 48)]),
+      iv('Home stretch tempo', 480, 'power', 85),
+      iv('Cool down', 510, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-recovery-cruise', name: 'Recovery Century Cruise', category: 'Rides',
+    description: 'A very long day at a very easy pace \u2014 all endurance, one café stop, and nothing that will trouble your legs.',
+    intervals: [
+      iv('Warm up', 600, 'power', 52),
+      iv('All easy endurance', 3600, 'power', 62),
+      iv('Café stop', 900, 'power', 45),
+      iv('Easy endurance', 3600, 'power', 62),
+      ...repeatIv(4, () => [iv('Gentle roll up', 120, 'power', 68), iv('Gentle roll down', 120, 'power', 58)]),
+      iv('Easy spin home', 900, 'power', 60),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-leadout-day', name: 'Sprinter\u2019s Lead-Out Day', category: 'Rides',
+    description: 'Mostly easy miles broken up by repeated lead-out-and-sprint efforts \u2014 practice for the final 200 meters.',
+    intervals: [
+      iv('Warm up', 600, 'power', 58),
+      iv('Endurance', 1500, 'power', 68),
+      ...repeatIv(6, () => [iv('Lead-out effort', 60, 'power', 105), iv('Full sprint', 20, 'rpe', 10), iv('Recover', 150, 'power', 62)]),
+      iv('Endurance cruise', 1800, 'power', 68),
+      ...repeatIv(5, () => [iv('Lead-out effort', 60, 'power', 108), iv('Full sprint', 20, 'rpe', 10), iv('Recover', 150, 'power', 62)]),
+      iv('Group tempo', 1200, 'power', 82),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-ridge-traverse', name: 'Ridge Traverse', category: 'Rides',
+    description: 'A high, exposed ridge road \u2014 rolling punchy climbs, buffeting crosswind straights, and views for miles the whole way along.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Approach climb to the ridge', 1200, 'power', 82),
+      iv('Ridge crosswind straight', 900, 'power', 78),
+      ...repeatIv(6, () => [iv('Punchy ridge climb', 180, 'power', 98), iv('Short descent', 120, 'power', 62)]),
+      iv('Exposed gap surge', 180, 'power', 105),
+      iv('Steady ridge cruise', 1200, 'power', 72),
+      ...repeatIv(5, () => [iv('Punchy ridge climb', 150, 'power', 100), iv('Short descent', 120, 'power', 62)]),
+      iv('Final ridge push', 600, 'power', 90),
+      iv('Long descent off the ridge', 900, 'power', 55),
+      iv('Valley cruise home', 900, 'power', 65),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-volcano-rim', name: 'Volcano Rim Loop', category: 'Rides',
+    description: 'Climb to the caldera rim, cruise the crater in thin air, punch over the final lip, then unwind down a long switchback descent.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Lower slopes', 2400, 'power', 70),
+      iv('Climb to the rim', 1800, 'power', 90),
+      ...repeatIv(4, () => [iv('Rim surge', 90, 'power', 105), iv('Rim steady', 180, 'power', 85)]),
+      iv('Rim cruise', 1200, 'power', 75),
+      iv('Crater lip push', 480, 'power', 98),
+      iv('Summit sprint', 30, 'rpe', 10),
+      iv('Long switchback descent', 1200, 'power', 55),
+      iv('Foothills cruise', 2400, 'power', 66),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-desert-crossing', name: 'Desert Crossing', category: 'Rides',
+    description: 'Flat, hot and relentless \u2014 long steady grinding across open desert with a stiff headwind fight and a race to town before dark.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      iv('Early steady tempo', 2400, 'power', 78),
+      iv('Heat building endurance', 1800, 'power', 68),
+      iv('Headwind grind', 1500, 'power', 76),
+      iv('Shade break easy spin', 600, 'power', 52),
+      iv('Long steady grind', 2400, 'power', 75),
+      ...repeatIv(6, () => [iv('Mirage roller up', 120, 'power', 85), iv('Mirage roller down', 120, 'power', 62)]),
+      iv('Race the sunset', 1200, 'power', 82),
+      iv('Final push into town', 600, 'power', 90),
+      iv('Sprint for the town limit', 30, 'rpe', 9),
+      iv('Cool down', 630, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-fjord-switchbacks', name: 'Fjord Switchbacks', category: 'Rides',
+    description: 'Relentless steep drops into fjords and brutal switchback climbs back out, again and again \u2014 the answer to a flat ride.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Approach', 900, 'power', 68),
+      ...repeatIv(6, () => [iv('Steep drop into the fjord', 180, 'power', 60), iv('Switchback climb out', 360, 'power', 92)]),
+      iv('Fjord-side flat cruise', 900, 'power', 70),
+      ...repeatIv(4, () => [iv('Steep drop into the fjord', 180, 'power', 58), iv('Switchback climb out', 420, 'power', 95)]),
+      iv('Final climb out surge', 180, 'power', 105),
+      iv('Summit ridge cruise', 900, 'power', 72),
+      iv('Long descent home', 720, 'power', 55),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-highland-loop', name: 'Highland Loop', category: 'Rides',
+    description: 'Rolling glens, a driving crosswind along the loch, a squall to punch through, and one huge climb to close the loop.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      ...repeatIv(6, () => [iv('Glen roll up', 180, 'power', 78), iv('Glen roll down', 120, 'power', 62)]),
+      iv('Loch crosswind straight', 1200, 'power', 80),
+      ...repeatIv(4, () => [iv('Squall surge', 90, 'power', 100), iv('Steady through the rain', 150, 'power', 75)]),
+      iv('Steady glen cruise', 1500, 'power', 68),
+      iv('Approach the big climb', 900, 'power', 75),
+      iv('Big climb \u2014 the pass', 1500, 'power', 90),
+      iv('Summit surge', 60, 'power', 108),
+      iv('Long descent', 1080, 'power', 55),
+      iv('Loch road home', 1200, 'power', 68),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-dolomites-double', name: 'Dolomites Double', category: 'Rides',
+    description: 'Two legendary mountain passes back to back \u2014 hairpins, steep ramps and thin air, twice over.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Valley approach', 1500, 'power', 68),
+      iv('Pass 1 lower slopes', 900, 'power', 80),
+      ...repeatIv(5, () => [iv('Pass 1 hairpin surge', 90, 'power', 105), iv('Pass 1 steady', 180, 'power', 88)]),
+      iv('Pass 1 summit push', 480, 'power', 98),
+      iv('Summit 1 sprint', 30, 'rpe', 10),
+      iv('Descent 1', 1200, 'power', 55),
+      iv('Valley recovery', 900, 'power', 65),
+      iv('Pass 2 lower slopes', 1200, 'power', 82),
+      ...repeatIv(6, () => [iv('Pass 2 hairpin surge', 90, 'power', 107), iv('Pass 2 steady', 180, 'power', 89)]),
+      iv('Pass 2 summit push', 600, 'power', 100),
+      iv('Summit 2 sprint', 30, 'rpe', 10),
+      iv('Descent 2', 1320, 'power', 55),
+      iv('Valley cruise home', 1500, 'power', 68),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-wine-country', name: 'Wine Country Rollers', category: 'Rides',
+    description: 'Gentle-looking vineyard rollers that never actually let up, strung between small hilltop villages.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      ...repeatIv(10, () => [iv('Vineyard roll up', 150, 'power', 80), iv('Vineyard roll down', 120, 'power', 62)]),
+      iv('Hilltop village push', 240, 'power', 85),
+      iv('Steady lane cruise', 1200, 'power', 68),
+      ...repeatIv(6, () => [iv('Vineyard roll up', 120, 'power', 82), iv('Vineyard roll down', 90, 'power', 62)]),
+      iv('Second steady cruise', 600, 'power', 70),
+      iv('Final village climb', 360, 'power', 90),
+      iv('Sprint for the piazza', 30, 'rpe', 9),
+      iv('Easy lane spin', 900, 'power', 60),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-moorland-crossing', name: 'Moorland Crossing', category: 'Rides',
+    description: 'Exposed, boggy and utterly alone \u2014 a driving headwind across open moorland with rough gravel sections underfoot.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Moor road endurance', 1500, 'power', 68),
+      iv('Headwind grind', 1200, 'power', 78),
+      iv('Boggy gravel sector', 900, 'power', 72),
+      iv('Steady push', 1200, 'power', 75),
+      ...repeatIv(5, () => [iv('Gust surge', 90, 'power', 100), iv('Steady into the wind', 150, 'power', 72)]),
+      iv('Rough track climb', 480, 'power', 85),
+      iv('Descent off the moor', 600, 'power', 55),
+      iv('Steady road cruise', 1200, 'power', 68),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-canyon-rim', name: 'Canyon Rim Ride', category: 'Rides',
+    description: 'Technical rim-road riding \u2014 sudden drops into side canyons and sharp climbs back out, over and over, with sheer exposure throughout.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Rim approach', 1200, 'power', 70),
+      ...repeatIv(6, () => [iv('Drop into the canyon', 120, 'power', 58), iv('Climb back out', 240, 'power', 95)]),
+      iv('Rim cruise', 1200, 'power', 75),
+      ...repeatIv(5, () => [iv('Drop into the canyon', 120, 'power', 58), iv('Climb back out', 300, 'power', 97)]),
+      iv('Overlook push', 480, 'power', 100),
+      iv('Overlook sprint', 30, 'rpe', 10),
+      iv('Long rim descent', 900, 'power', 55),
+      iv('Trailhead cruise', 1200, 'power', 68),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-alpine-col-chain', name: 'Alpine Col Chain', category: 'Rides',
+    description: 'Four cols in one day \u2014 none of them huge alone, but the fatigue stacks fast by the fourth.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Approach', 1800, 'power', 68),
+      iv('Col 1 climb', 900, 'power', 88),
+      iv('Col 1 descent', 600, 'power', 55),
+      iv('Col 2 climb', 1080, 'power', 89),
+      iv('Col 2 descent', 720, 'power', 55),
+      iv('Valley connector', 900, 'power', 68),
+      iv('Col 3 climb', 1200, 'power', 90),
+      iv('Col 3 descent', 780, 'power', 55),
+      iv('Col 4 climb \u2014 legs are gone', 1320, 'power', 86),
+      iv('Col 4 summit surge', 60, 'power', 102),
+      iv('Final descent', 1080, 'power', 55),
+      iv('Valley cruise home', 1800, 'power', 68),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-anti-gravity', name: 'Anti-Gravity Day', category: 'Rides',
+    description: 'The mountain owes you nothing \u2014 every fast, easy drop has to be paid back with a harder climb straight after. The debt keeps compounding.',
+    notes: 'A playful inversion of a hill-repeat session: descents are quick and light, but each one is followed by a "debt climb" that\u2019s a notch harder than a normal repeat would be. By the end your legs will disagree that gravity was ever on your side.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      ...repeatIv(12, () => [iv('Fast controlled descent', 180, 'power', 58), iv('Debt climb', 360, 'power', 94)]),
+      iv('Halfway ledger check', 480, 'power', 60),
+      ...repeatIv(6, () => [iv('Fast controlled descent', 180, 'power', 60), iv('Debt climb', 360, 'power', 96)]),
+      iv('Final settlement climb', 600, 'power', 100),
+      iv('Victory sprint', 30, 'rpe', 10),
+      iv('Long cruise down the mountain', 1200, 'power', 58),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-storm-chase', name: 'Storm Chase', category: 'Rides',
+    description: 'A front is building on the horizon and you\u2019re racing it home \u2014 escalating gusts, a mid-ride lightning-strike sprint, and a full-gas dash for shelter.',
+    intervals: [
+      iv('Warm up', 480, 'power', 56),
+      iv('Calm before the storm', 900, 'power', 75),
+      iv('Distant thunder', 120, 'power', 95),
+      iv('Building tempo \u2014 skies darkening', 900, 'power', 82),
+      ...repeatIv(5, () => [iv('Wind gust surge', 90, 'power', 105), iv('Brace and hold', 120, 'power', 80)]),
+      iv('Storm closing in', 720, 'power', 90),
+      iv('Lightning strike sprint', 30, 'rpe', 10),
+      ...repeatIv(4, () => [iv('Squall surge', 60, 'power', 110), iv('Push through', 120, 'power', 85)]),
+      iv('Full gas race to shelter', 300, 'power', 105),
+      iv('Sprint for the door', 30, 'rpe', 10),
+      iv('Sheltered \u2014 catching breath', 480, 'power', 55),
+      iv('Cool down', 480, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-tt-through-time', name: 'Time Trial Through Time', category: 'Rides',
+    description: 'A ride through the eras of cycling \u2014 heavy steel-bike tempo, smooth aero-bar threshold blocks, and precise modern power-meter intervals.',
+    notes: 'Three "eras," three different feels: Era 1 is steady, heavy and mechanical; Era 2 is long and smooth, built for holding an aero position; Era 3 is short, sharp and exactly on target the way a power meter demands.',
+    intervals: [
+      iv('Warm up', 600, 'power', 58),
+      iv('Era 1: the steel age', 2100, 'power', 75),
+      ...repeatIv(5, () => [iv('Cobbled test track push', 60, 'power', 98), iv('Recover', 60, 'power', 70)]),
+      iv('Transition', 480, 'power', 60),
+      iv('Era 2: the aero age \u2014 block 1', 1200, 'power', 98),
+      iv('Era 2: the aero age \u2014 block 2', 1200, 'power', 100),
+      iv('Transition', 480, 'power', 60),
+      ...repeatIv(6, () => [iv('Era 3: on the power meter', 120, 'power', 105), iv('Era 3: recover to target', 60, 'power', 65)]),
+      iv('Era 3 finale \u2014 perfectly paced', 600, 'power', 102),
+      iv('Modern day sprint', 30, 'rpe', 10),
+      iv('Cool down', 630, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-the-gauntlet', name: 'The Gauntlet', category: 'Rides',
+    description: 'Five boss climbs, each tougher than the last, a secret boss thrown in for good measure, and one Final Boss standing between you and the victory lap.',
+    notes: 'Treat each "boss" like a level \u2014 the checkpoints between them are recovery, not the end of the fight. Save something for the Final Boss.',
+    intervals: [
+      iv('Warm up', 600, 'power', 56),
+      iv('Level 1 boss', 480, 'power', 82),
+      iv('Checkpoint', 300, 'power', 60),
+      iv('Level 2 boss', 480, 'power', 86),
+      iv('Checkpoint', 300, 'power', 62),
+      iv('Level 3 boss', 480, 'power', 90),
+      iv('Checkpoint', 300, 'power', 62),
+      iv('Secret boss', 480, 'power', 88),
+      iv('Checkpoint', 300, 'power', 62),
+      ...repeatIv(4, () => [iv('Level 4 boss \u2014 attack pattern', 60, 'power', 100), iv('Level 4 boss \u2014 dodge', 90, 'power', 75)]),
+      iv('Checkpoint', 360, 'power', 62),
+      ...repeatIv(6, () => [iv('Bonus stage surge', 60, 'power', 95), iv('Bonus stage recover', 90, 'power', 65)]),
+      ...repeatIv(4, () => [iv('Level 5 boss \u2014 attack pattern', 60, 'power', 106), iv('Level 5 boss \u2014 dodge', 90, 'power', 75)]),
+      iv('Checkpoint', 360, 'power', 62),
+      iv('FINAL BOSS', 300, 'power', 110),
+      iv('Boss defeated sprint', 30, 'rpe', 10),
+      iv('Victory lap', 1500, 'power', 62),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-migration-flock', name: 'Migration Ride: Follow the Flock', category: 'Rides',
+    description: 'A long ride shaped like a migration \u2014 rising on thermals, rotating through the flock in a crosswind formation, and one long steady wingspan haul before landing.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Rising with the flock', 900, 'power', 82),
+      iv('Thermal soaring cruise', 1200, 'power', 70),
+      ...repeatIv(6, () => [iv('Flock surge', 120, 'power', 98), iv('Glide and reform', 120, 'power', 66)]),
+      iv('Crosswind formation flying', 1200, 'power', 80),
+      iv('Long wingspan haul', 2700, 'power', 68),
+      iv('Storm front \u2014 push through', 900, 'power', 85),
+      ...repeatIv(5, () => [iv('Flock surge', 120, 'power', 100), iv('Glide and reform', 150, 'power', 66)]),
+      iv('Descending to roost', 900, 'power', 55),
+      iv('Final approach push', 480, 'power', 88),
+      iv('Landing sprint', 30, 'rpe', 9),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+];
+const CATEGORIES = ['All', 'Rides', 'Basics', 'Recovery', 'Endurance', 'Tempo', 'Sweet Spot', 'Threshold', 'VO2 Max', 'Anaerobic', 'FTP Test', 'Mixed'];
+
+// ---------- audio ----------
+function useBeeper() {
+  const ctxRef = useRef(null);
+  function ensure() {
+    if (!ctxRef.current) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) ctxRef.current = new AC();
+    }
+    if (ctxRef.current && ctxRef.current.state === 'suspended') ctxRef.current.resume();
+    return ctxRef.current;
+  }
+  function beep(freq, duration, gainVal) {
+    const ctx = ensure();
+    if (!ctx || gainVal <= 0) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = freq;
+    osc.type = 'sine';
+    gain.gain.value = gainVal;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+  }
+  return { beep };
+}
+
+// ---------- trainer connectivity (Web Bluetooth FTMS) ----------
+function useTrainer() {
+  const [status, setStatus] = useState('disconnected');
+  const [deviceName, setDeviceName] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [power, setPower] = useState(null);
+  const [cadence, setCadence] = useState(null);
+  const [hasControl, setHasControl] = useState(false);
+  const deviceRef = useRef(null);
+  const controlRef = useRef(null);
+  const supported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
+
+  function handleBikeData(event) {
+    try {
+      const dv = event.target.value;
+      const flags = dv.getUint16(0, true);
+      let offset = 2;
+      let cad = null, pow = null;
+      if ((flags & 0x0001) === 0) offset += 2;
+      if (flags & 0x0002) offset += 2;
+      if (flags & 0x0004) { cad = dv.getUint16(offset, true) / 2; offset += 2; }
+      if (flags & 0x0008) offset += 2;
+      if (flags & 0x0010) offset += 3;
+      if (flags & 0x0020) offset += 2;
+      if (flags & 0x0040) { pow = dv.getInt16(offset, true); offset += 2; }
+      if (cad !== null) setCadence(Math.round(cad));
+      if (pow !== null) setPower(pow);
+    } catch (e) {}
+  }
+  function handleDisconnected() {
+    setStatus('disconnected');
+    setPower(null);
+    setCadence(null);
+    setHasControl(false);
+  }
+  async function connect() {
+    if (!supported) { setErrorMsg('Bluetooth is not available in this browser or environment.'); setStatus('error'); return; }
+    setStatus('connecting'); setErrorMsg(null);
+    try {
+      const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [0x1826] }], optionalServices: [0x1826] });
+      device.addEventListener('gattserverdisconnected', handleDisconnected);
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(0x1826);
+      try {
+        const bikeChar = await service.getCharacteristic(0x2ad2);
+        await bikeChar.startNotifications();
+        bikeChar.addEventListener('characteristicvaluechanged', handleBikeData);
+      } catch (e) {}
+      try {
+        const controlChar = await service.getCharacteristic(0x2ad9);
+        await controlChar.writeValue(new Uint8Array([0x00]));
+        controlRef.current = controlChar;
+        setHasControl(true);
+      } catch (e) { controlRef.current = null; setHasControl(false); }
+      deviceRef.current = device;
+      setDeviceName(device.name || 'Trainer');
+      setStatus('connected');
+    } catch (e) {
+      setErrorMsg((e && e.message) ? e.message : 'Could not connect to a trainer.');
+      setStatus('error');
+    }
+  }
+  function disconnect() {
+    try { deviceRef.current && deviceRef.current.gatt && deviceRef.current.gatt.disconnect(); } catch (e) {}
+    setStatus('disconnected'); setDeviceName(null); setPower(null); setCadence(null); setHasControl(false);
+  }
+  async function setErgTarget(watts) {
+    if (!controlRef.current) return;
+    try {
+      const buf = new ArrayBuffer(3);
+      const dv = new DataView(buf);
+      dv.setUint8(0, 0x05);
+      dv.setInt16(1, Math.round(watts), true);
+      await controlRef.current.writeValue(buf);
+    } catch (e) {}
+  }
+  return { supported, status, deviceName, errorMsg, power, cadence, hasControl, connect, disconnect, setErgTarget };
+}
+
+// ---------- profile chart ----------
+function ProfileChart({ intervals, height = 84, progress = null }) {
+  const total = totalDuration(intervals) || 1;
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', height, width: '100%', background: PANEL2, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}` }}>
+      {intervals.map((it) => {
+        const z = zoneFor(it);
+        const w = (it.duration / total) * 100;
+        const h = Math.max(14, Math.min(100, z.intensity * 78));
+        const isFree = it.type === 'free';
+        return (
+          <div key={it.id} style={{ width: `${w}%`, height: '100%', display: 'flex', alignItems: 'flex-end', borderRight: `1px solid ${INK}` }}>
+            <div style={{ width: '100%', height: `${h}%`, background: isFree ? `repeating-linear-gradient(135deg, ${z.color}, ${z.color} 4px, #3a3f45 4px, #3a3f45 8px)` : z.color }} />
+          </div>
+        );
+      })}
+      {progress !== null && (
+        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${progress * 100}%`, background: 'rgba(255,255,255,0.14)', borderRight: `2px solid ${TEXT}`, pointerEvents: 'none' }} />
+      )}
+    </div>
+  );
+}
+
+// ---------- small ui atoms ----------
+function Chip({ active, children, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '6px 12px', borderRadius: 999, fontSize: 13, whiteSpace: 'nowrap',
+      border: `1px solid ${active ? 'var(--accent)' : LINE}`, background: active ? 'var(--accent)' : 'transparent',
+      color: active ? INK : SUB, fontWeight: active ? 700 : 500, cursor: 'pointer', flexShrink: 0,
+    }}>{children}</button>
+  );
+}
+function IconBtn({ onClick, children, disabled, danger }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      width: 34, height: 34, borderRadius: 8, border: `1px solid ${LINE}`,
+      background: PANEL2, color: disabled ? '#4a4f56' : (danger ? RED : TEXT),
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, flexShrink: 0,
+    }}>{children}</button>
+  );
+}
+function Switch({ checked, onChange, disabled }) {
+  return (
+    <button onClick={() => !disabled && onChange(!checked)} disabled={disabled} style={{
+      width: 44, height: 26, borderRadius: 13, border: `1px solid ${LINE}`,
+      background: checked ? 'var(--accent)' : PANEL2, position: 'relative', cursor: disabled ? 'default' : 'pointer',
+      opacity: disabled ? 0.5 : 1, flexShrink: 0, padding: 0,
+    }}>
+      <div style={{ position: 'absolute', top: 2, left: checked ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: checked ? INK : SUB, transition: 'left .15s' }} />
+    </button>
+  );
+}
+function SettingRow({ label, sub, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 14, color: TEXT }}>{label}</div>
+        {sub && <div style={{ fontSize: 12, color: SUB, marginTop: 2 }}>{sub}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+function SectionHeader({ icon, title }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 26, marginBottom: 4 }}>
+      {icon}
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 16, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{title}</div>
+    </div>
+  );
+}
+
+// ---------- workout detail sheet ----------
+function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdit, isCustom, onDelete, onSaveScaled }) {
+  const originalTotal = totalDuration(workout.intervals);
+  const scalable = !workout.fixedLength;
+  const [targetMinutes, setTargetMinutes] = useState(Math.max(10, Math.round(originalTotal / 60)));
+  useEffect(() => { setTargetMinutes(Math.max(10, Math.round(originalTotal / 60))); }, [workout.id]);
+
+  const scaledIntervals = useMemo(
+    () => (scalable ? smartScaleWorkout(workout.intervals, targetMinutes * 60, workout.repeatWholeCore) : workout.intervals),
+    [workout, targetMinutes, scalable]
+  );
+  const actualTotal = totalDuration(scaledIntervals);
+  const isScaled = scalable && Math.abs(actualTotal - originalTotal) > 20;
+  const needsFtp = scaledIntervals.some(i => i.type === 'power');
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 40, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: INK, width: '100%', maxWidth: 520, borderRadius: '18px 18px 0 0', border: `1px solid ${LINE}`, borderBottom: 'none', padding: 20, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{workout.name}</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: SUB, cursor: 'pointer' }}><X size={22} /></button>
+        </div>
+        <div style={{ fontSize: 13, color: SUB, marginBottom: 14 }}>{workout.description}</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, fontSize: 12, color: SUB, flexWrap: 'wrap' }}>
+          <span style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '3px 8px' }}>{workout.category}</span>
+          <span style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '3px 8px' }}>{fmtLong(actualTotal)}</span>
+          <span style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '3px 8px' }}>{scaledIntervals.length} intervals</span>
+        </div>
+
+        <ProfileChart intervals={scaledIntervals} />
+
+        {scalable && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: SUB, marginBottom: 6 }}>
+              <span>Adjust length</span>
+              <span style={{ color: TEXT }}>{targetMinutes} min{isScaled ? ` \u2192 ${fmtLong(actualTotal)} actual` : ''}</span>
+            </div>
+            <input type="range" min={10} max={360} step={5} value={targetMinutes}
+              onChange={e => setTargetMinutes(Number(e.target.value))}
+              style={{ width: '100%', accentColor: settings.accentColor }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: SUB, marginTop: 2 }}>
+              <span>10 min</span><span>6 hours</span>
+            </div>
+            {isScaled && (
+              <button onClick={() => setTargetMinutes(Math.max(10, Math.round(originalTotal / 60)))}
+                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                Reset to original length
+              </button>
+            )}
+          </div>
+        )}
+
+        {needsFtp && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+            <Gauge size={18} color="var(--accent)" />
+            <span style={{ fontSize: 13, color: SUB }}>Your FTP</span>
+            <input type="number" value={ftp} onChange={e => setFtp(Math.max(50, Number(e.target.value) || 0))}
+              style={{ width: 80, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '6px 8px', fontSize: 14 }} />
+            <span style={{ fontSize: 13, color: SUB }}>watts</span>
+          </div>
+        )}
+
+        {workout.notes && (
+          <div style={{ marginTop: 16, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8, padding: 12, fontSize: 12.5, color: SUB, lineHeight: 1.5 }}>
+            {workout.notes}
+          </div>
+        )}
+
+        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+          {scaledIntervals.map((it) => {
+            const z = zoneFor(it);
+            return (
+              <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '6px 8px', background: PANEL, borderRadius: 6 }}>
+                <div style={{ width: 4, height: 24, background: z.color, borderRadius: 2, flexShrink: 0 }} />
+                <div style={{ flex: 1, color: TEXT }}>{it.label}</div>
+                <div style={{ color: SUB }}>{formatTarget(it, ftp, settings.targetDisplay)}</div>
+                <div style={{ color: SUB, width: 44, textAlign: 'right' }}>{fmt(it.duration)}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+          {isCustom && (
+            <>
+              <button onClick={onEdit} style={{ flex: '1 1 100px', padding: '12px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}><Edit3 size={16} /> Edit</button>
+              <button onClick={onDelete} style={{ padding: '12px 14px', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: RED, cursor: 'pointer' }}><Trash2 size={16} /></button>
+            </>
+          )}
+          {isScaled && (
+            <button onClick={() => onSaveScaled({ ...workout, id: 'custom-' + newId(), name: `${workout.name} (${targetMinutes}m)`, intervals: scaledIntervals })}
+              style={{ flex: '1 1 140px', padding: '12px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
+              <Save size={16} /> Save as new
+            </button>
+          )}
+          <button onClick={() => onStart({ ...workout, intervals: scaledIntervals })}
+            style={{ flex: '2 1 160px', padding: '12px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}>
+            <Play size={18} fill={INK} /> Start workout
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- library view ----------
+function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle }) {
+  const [query, setQuery] = useState('');
+  const [cat, setCat] = useState(lockedCategory || 'All');
+  const all = useMemo(() => {
+    const withFlag = LIBRARY.map(w => ({ ...w, custom: false })).concat(customWorkouts.map(w => ({ ...w, custom: true })));
+    const activeCat = lockedCategory || cat;
+    return withFlag.filter(w => (activeCat === 'All' || activeCat === 'Custom' ? true : w.category === activeCat) && (activeCat !== 'Custom' || w.custom))
+      .filter(w => w.name.toLowerCase().includes(query.toLowerCase()));
+  }, [query, cat, customWorkouts, lockedCategory]);
+
+  return (
+    <div style={{ padding: '16px 16px 80px' }}>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, letterSpacing: 0.3, marginBottom: 2 }}>{title || 'Workout library'}</div>
+      <div style={{ fontSize: 13, color: SUB, marginBottom: 14 }}>{subtitle || `${all.length} workout${all.length === 1 ? '' : 's'} \u00b7 pick one and go`}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 12px', marginBottom: 12 }}>
+        <Search size={16} color={SUB} />
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search workouts"
+          style={{ background: 'none', border: 'none', outline: 'none', color: TEXT, fontSize: 14, flex: 1 }} />
+      </div>
+      {!lockedCategory && (
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
+          {CATEGORIES.concat('Custom').map(c => <Chip key={c} active={cat === c} onClick={() => setCat(c)}>{c}</Chip>)}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {all.map(w => {
+          const total = totalDuration(w.intervals);
+          return (
+            <div key={w.id} onClick={() => onOpen(w)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <div style={{ fontWeight: 600, fontSize: 15, color: TEXT }}>{w.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--accent)' }}>{fmtLong(total)}</div>
+              </div>
+              <div style={{ fontSize: 12.5, color: SUB, marginBottom: 10 }}>{w.description}</div>
+              <ProfileChart intervals={w.intervals} height={40} />
+            </div>
+          );
+        })}
+        {all.length === 0 && <div style={{ color: SUB, fontSize: 13, textAlign: 'center', padding: '30px 0' }}>No workouts match. Try the builder tab to make your own.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ---------- builder view ----------
+const QUICK_BLOCKS = [
+  { label: 'Warm up', duration: 300, type: 'power', target: 55 },
+  { label: 'Cool down', duration: 300, type: 'power', target: 50 },
+  { label: 'Recovery', duration: 120, type: 'power', target: 55 },
+  { label: 'Sweet spot', duration: 480, type: 'power', target: 90 },
+  { label: 'Threshold', duration: 300, type: 'power', target: 100 },
+  { label: 'VO2 max', duration: 180, type: 'power', target: 115 },
+  { label: 'Sprint', duration: 30, type: 'rpe', target: 10 },
+  { label: 'Free ride', duration: 300, type: 'free', target: null },
+];
+
+function IntervalRow({ interval, onChange, onDelete, onMoveUp, onMoveDown, onDuplicate, first, last }) {
+  const z = zoneFor(interval);
+  const mins = Math.floor(interval.duration / 60);
+  const secs = interval.duration % 60;
+  return (
+    <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ width: 4, alignSelf: 'stretch', background: z.color, borderRadius: 2 }} />
+        <input value={interval.label} onChange={e => onChange({ ...interval, label: e.target.value })}
+          placeholder="Label" style={{ flex: 1, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '6px 8px', fontSize: 13 }} />
+        <IconBtn onClick={onMoveUp} disabled={first}><ChevronUp size={16} /></IconBtn>
+        <IconBtn onClick={onMoveDown} disabled={last}><ChevronDown size={16} /></IconBtn>
+        <IconBtn onClick={onDuplicate}><Copy size={15} /></IconBtn>
+        <IconBtn onClick={onDelete} danger><Trash2 size={15} /></IconBtn>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ fontSize: 12, color: SUB }}>Duration</label>
+        <input type="number" min="0" value={mins} onChange={e => onChange({ ...interval, duration: Math.max(0, Number(e.target.value) || 0) * 60 + secs })}
+          style={{ width: 48, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '5px 6px', fontSize: 13 }} />
+        <span style={{ color: SUB, fontSize: 12 }}>m</span>
+        <input type="number" min="0" max="59" value={secs} onChange={e => onChange({ ...interval, duration: mins * 60 + Math.min(59, Math.max(0, Number(e.target.value) || 0)) })}
+          style={{ width: 48, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '5px 6px', fontSize: 13 }} />
+        <span style={{ color: SUB, fontSize: 12 }}>s</span>
+        <select value={interval.type} onChange={e => {
+          const t = e.target.value;
+          const target = t === 'power' ? 70 : t === 'rpe' ? 5 : null;
+          onChange({ ...interval, type: t, target });
+        }} style={{ background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '5px 6px', fontSize: 13 }}>
+          <option value="power">Power</option>
+          <option value="rpe">RPE</option>
+          <option value="free">Free</option>
+        </select>
+        {interval.type !== 'free' && (
+          <>
+            <input type="number" value={interval.target ?? ''} onChange={e => onChange({ ...interval, target: Number(e.target.value) || 0 })}
+              style={{ width: 52, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '5px 6px', fontSize: 13 }} />
+            <span style={{ color: SUB, fontSize: 12 }}>{interval.type === 'power' ? '% FTP' : '/ 10'}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BuilderView({ customWorkouts, saveCustomWorkout, deleteCustomWorkout, editingWorkout, clearEditing }) {
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('Mixed');
+  const [description, setDescription] = useState('');
+  const [intervals, setIntervals] = useState([]);
+
+  useEffect(() => {
+    if (editingWorkout) {
+      setName(editingWorkout.name);
+      setCategory(editingWorkout.category);
+      setDescription(editingWorkout.description || '');
+      setIntervals(editingWorkout.intervals.map(i => ({ ...i })));
+    }
+  }, [editingWorkout]);
+
+  function addBlock(block) { setIntervals(list => [...list, iv(block.label, block.duration, block.type, block.target)]); }
+  function updateAt(idx, next) { setIntervals(list => list.map((it, i) => (i === idx ? next : it))); }
+  function removeAt(idx) { setIntervals(list => list.filter((_, i) => i !== idx)); }
+  function duplicateAt(idx) {
+    setIntervals(list => {
+      const copy = { ...list[idx], id: newId() };
+      const out = [...list];
+      out.splice(idx + 1, 0, copy);
+      return out;
+    });
+  }
+  function move(idx, dir) {
+    setIntervals(list => {
+      const out = [...list];
+      const j = idx + dir;
+      if (j < 0 || j >= out.length) return out;
+      [out[idx], out[j]] = [out[j], out[idx]];
+      return out;
+    });
+  }
+  function reset() { setName(''); setCategory('Mixed'); setDescription(''); setIntervals([]); clearEditing(); }
+  function save() {
+    if (!name.trim() || intervals.length === 0) return;
+    saveCustomWorkout({ id: editingWorkout ? editingWorkout.id : 'custom-' + newId(), name: name.trim(), category, description: description.trim() || 'Custom workout.', intervals });
+    reset();
+  }
+
+  const total = totalDuration(intervals);
+
+  return (
+    <div style={{ padding: '16px 16px 80px' }}>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, letterSpacing: 0.3, marginBottom: 2 }}>{editingWorkout ? 'Edit workout' : 'Build a workout'}</div>
+      <div style={{ fontSize: 13, color: SUB, marginBottom: 16 }}>Stack intervals, mix power, RPE and free riding.</div>
+
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="Workout name"
+        style={{ width: '100%', background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '10px 12px', fontSize: 15, marginBottom: 8, boxSizing: 'border-box' }} />
+      <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Short description"
+        style={{ width: '100%', background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '10px 12px', fontSize: 13, marginBottom: 8, boxSizing: 'border-box' }} />
+      <select value={category} onChange={e => setCategory(e.target.value)}
+        style={{ width: '100%', background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '10px 12px', fontSize: 13, marginBottom: 14, boxSizing: 'border-box' }}>
+        {CATEGORIES.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+
+      {intervals.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <ProfileChart intervals={intervals} />
+          <div style={{ fontSize: 12, color: SUB, marginTop: 6 }}>{fmtLong(total)} total \u00b7 {intervals.length} intervals</div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 12, color: SUB, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>Quick add</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+        {QUICK_BLOCKS.map((b, i) => (
+          <button key={i} onClick={() => addBlock(b)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL, color: TEXT, fontSize: 12.5, cursor: 'pointer' }}>
+            <Plus size={13} /> {b.label}
+          </button>
+        ))}
+      </div>
+
+      {intervals.map((it, idx) => (
+        <IntervalRow key={it.id} interval={it}
+          onChange={next => updateAt(idx, next)} onDelete={() => removeAt(idx)}
+          onMoveUp={() => move(idx, -1)} onMoveDown={() => move(idx, 1)} onDuplicate={() => duplicateAt(idx)}
+          first={idx === 0} last={idx === intervals.length - 1} />
+      ))}
+      {intervals.length === 0 && <div style={{ color: SUB, fontSize: 13, textAlign: 'center', padding: '20px 0', border: `1px dashed ${LINE}`, borderRadius: 10, marginBottom: 16 }}>No intervals yet \u2014 tap a quick add block above to start.</div>}
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+        {editingWorkout && <button onClick={reset} style={{ flex: 1, padding: '12px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: SUB, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>}
+        <button onClick={save} disabled={!name.trim() || intervals.length === 0}
+          style={{ flex: 2, padding: '12px 0', borderRadius: 10, border: 'none', background: (!name.trim() || intervals.length === 0) ? '#4a4f56' : 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: (!name.trim() || intervals.length === 0) ? 'default' : 'pointer' }}>
+          <Save size={17} /> {editingWorkout ? 'Save changes' : 'Save workout'}
+        </button>
+      </div>
+
+      {customWorkouts.length > 0 && (
+        <div style={{ marginTop: 30 }}>
+          <div style={{ fontSize: 12, color: SUB, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>Your saved workouts</div>
+          {customWorkouts.map(w => (
+            <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, color: TEXT, fontWeight: 600 }}>{w.name}</div>
+                <div style={{ fontSize: 12, color: SUB }}>{fmtLong(totalDuration(w.intervals))} \u00b7 {w.category}</div>
+              </div>
+              <IconBtn onClick={() => { setName(w.name); setCategory(w.category); setDescription(w.description); setIntervals(w.intervals.map(i => ({ ...i }))); }}><Edit3 size={15} /></IconBtn>
+              <IconBtn onClick={() => deleteCustomWorkout(w.id)} danger><Trash2 size={15} /></IconBtn>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A rider is judged to have "stalled" on a ramp test once their power sits
+// below this fraction of the current step's target for this many seconds
+// in a row. Tune these two numbers to make the auto-stop more or less
+// forgiving.
+const RAMP_FAIL_WATT_RATIO = 0.8;
+const RAMP_FAIL_SECONDS = 15;
+
+function avgOf(samples) {
+  if (!samples || samples.length === 0) return null;
+  return Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
+}
+
+// ---------- player ----------
+function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, onApplyFtp }) {
+  const intervals = workout.intervals;
+  const isRampTest = !!workout.autoStopTest;
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(intervals[0].duration);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isDone, setIsDone] = useState(false);
+  const [testResult, setTestResult] = useState(null); // { ftp, auto } once a ramp test ends
+  const [ftpApplied, setFtpApplied] = useState(false);
+  const beepedRef = useRef(new Set());
+  const wakeLockRef = useRef(null);
+  const prevBleStatus = useRef(trainer.status);
+  const trainerPowerRef = useRef(trainer.power);
+  const stepSamplesRef = useRef([]); // watt readings collected during the current ramp step
+  const lastStepAvgRef = useRef(null); // average watts of the last fully-completed ramp step
+  const underPowerStreakRef = useRef(0); // consecutive seconds under the fail threshold
+  const triggerAutoStopRef = useRef(() => {});
+  const { beep } = useBeeper();
+
+  useEffect(() => { trainerPowerRef.current = trainer.power; }, [trainer.power]);
+
+  // Always keep this pointed at a fresh version of the auto-stop logic so
+  // the ticking interval below can call it without needing to restart
+  // itself every time state/props it depends on change.
+  triggerAutoStopRef.current = () => {
+    const estimateFrom = lastStepAvgRef.current;
+    setIsPlaying(false);
+    setIsDone(true);
+    if (estimateFrom == null) return; // failed before completing a single tracked step \u2014 not enough data to guess FTP
+    const mult = workout.ftpMultiplier || 0.75;
+    const estimate = Math.round(estimateFrom * mult);
+    setTestResult({ ftp: estimate, auto: true });
+    if (onSaveFtpResult) onSaveFtpResult(estimate, workout.name);
+  };
+
+  useEffect(() => {
+    if (!isPlaying || isDone) return;
+    const t = setInterval(() => {
+      setTimeLeft(prev => {
+        const next = prev - 1;
+        if (settings.soundCountdown && next > 0 && next <= 3 && !beepedRef.current.has(currentIndex + '_' + next)) {
+          beepedRef.current.add(currentIndex + '_' + next);
+          beep(660, 0.08, 0.08 * settings.soundVolume);
+        }
+        return next;
+      });
+      // Ramp test: log the rider's actual watts each second and watch for
+      // a sustained drop below the step's target, which means they've
+      // stalled and the test should end for them.
+      if (isRampTest) {
+        const cur = intervals[currentIndex];
+        const isRampStep = cur.label !== 'Warm up' && cur.label !== 'Cool down';
+        const power = trainerPowerRef.current;
+        if (isRampStep && typeof power === 'number') {
+          stepSamplesRef.current.push(power);
+          if (cur.type === 'power') {
+            const targetWatts = Math.round((ftp * cur.target) / 100);
+            const failThreshold = targetWatts * RAMP_FAIL_WATT_RATIO;
+            underPowerStreakRef.current = power < failThreshold ? underPowerStreakRef.current + 1 : 0;
+            if (underPowerStreakRef.current >= RAMP_FAIL_SECONDS) triggerAutoStopRef.current();
+          }
+        } else if (!isRampStep) {
+          underPowerStreakRef.current = 0;
+        }
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [isPlaying, isDone, currentIndex, settings.soundCountdown, settings.soundVolume, isRampTest, ftp]);
+
+  useEffect(() => {
+    if (timeLeft >= 0) return;
+    if (currentIndex < intervals.length - 1) {
+      if (settings.soundIntervalBeep) beep(880, 0.2, 0.2 * settings.soundVolume);
+      if (isRampTest) {
+        const finishedStep = intervals[currentIndex];
+        if (finishedStep.label !== 'Warm up' && finishedStep.label !== 'Cool down') {
+          const avg = avgOf(stepSamplesRef.current);
+          if (avg != null) lastStepAvgRef.current = avg;
+        }
+        stepSamplesRef.current = [];
+        underPowerStreakRef.current = 0;
+      }
+      const next = currentIndex + 1;
+      setCurrentIndex(next);
+      setTimeLeft(intervals[next].duration);
+    } else {
+      if (settings.soundCompletion) beep(1046, 0.45, 0.25 * settings.soundVolume);
+      setIsPlaying(false);
+      setIsDone(true);
+      if (isRampTest) {
+        const finishedStep = intervals[currentIndex];
+        const avg = finishedStep.label !== 'Warm up' && finishedStep.label !== 'Cool down' ? avgOf(stepSamplesRef.current) : null;
+        if (avg != null) {
+          const mult = workout.ftpMultiplier || 0.75;
+          const estimate = Math.round(avg * mult);
+          setTestResult({ ftp: estimate, auto: false });
+          if (onSaveFtpResult) onSaveFtpResult(estimate, workout.name);
+        }
+      }
+    }
+  }, [timeLeft]);
+
+  // ERG mode: push power target to trainer on interval change
+  useEffect(() => {
+    if (!settings.ergMode || trainer.status !== 'connected' || !trainer.hasControl) return;
+    const current = intervals[currentIndex];
+    if (current.type === 'power') trainer.setErgTarget(Math.round((ftp * current.target) / 100));
+  }, [currentIndex, settings.ergMode, trainer.status, trainer.hasControl]);
+
+  // auto-pause if trainer disconnects mid-ride
+  useEffect(() => {
+    if (prevBleStatus.current === 'connected' && trainer.status !== 'connected' && settings.autoPauseOnDisconnect && isPlaying) {
+      setIsPlaying(false);
+    }
+    prevBleStatus.current = trainer.status;
+  }, [trainer.status]);
+
+  // keep screen awake while riding
+  useEffect(() => {
+    async function lock() {
+      try {
+        if (settings.keepAwake && isPlaying && navigator.wakeLock) {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+        }
+      } catch (e) {}
+    }
+    if (isPlaying) lock();
+    else if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; }
+    return () => { if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; } };
+  }, [isPlaying, settings.keepAwake]);
+
+  function togglePlay() { setIsPlaying(p => !p); }
+  function skip(dir) {
+    const next = Math.min(intervals.length - 1, Math.max(0, currentIndex + dir));
+    setCurrentIndex(next);
+    setTimeLeft(intervals[next].duration);
+    setIsDone(false);
+    setTestResult(null);
+    setFtpApplied(false);
+    stepSamplesRef.current = [];
+    underPowerStreakRef.current = 0;
+  }
+  function restart() {
+    setCurrentIndex(0); setTimeLeft(intervals[0].duration); setIsPlaying(false); setIsDone(false);
+    beepedRef.current = new Set();
+    setTestResult(null);
+    setFtpApplied(false);
+    stepSamplesRef.current = [];
+    lastStepAvgRef.current = null;
+    underPowerStreakRef.current = 0;
+  }
+
+  const current = intervals[currentIndex];
+  const next = intervals[currentIndex + 1];
+  const z = zoneFor(current);
+  const total = totalDuration(intervals);
+  const elapsedBefore = totalDuration(intervals.slice(0, currentIndex));
+  const elapsed = elapsedBefore + (current.duration - Math.max(0, timeLeft));
+  const progress = Math.min(1, elapsed / total);
+  const targetTxt = formatTarget(current, ftp, settings.targetDisplay);
+
+  return (
+    <div style={{ padding: '16px 16px 30px', minHeight: '70vh' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <button onClick={onExit} style={{ background: 'none', border: 'none', color: SUB, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}><X size={18} /> Exit</button>
+        <div style={{ fontSize: 13, color: SUB }}>{workout.name}</div>
+      </div>
+
+      <ProfileChart intervals={intervals} progress={progress} height={54} />
+
+      {trainer.status === 'connected' && (
+        <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'center' }}>
+          <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 14px', fontSize: 13, color: TEXT }}>
+            {trainer.power !== null ? `${trainer.power}W` : '\u2013 W'}
+          </div>
+          <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8, padding: '6px 14px', fontSize: 13, color: TEXT }}>
+            {trainer.cadence !== null ? `${trainer.cadence} rpm` : '\u2013 rpm'}
+          </div>
+        </div>
+      )}
+
+      <div style={{ textAlign: 'center', marginTop: 26 }}>
+        <div style={{ fontSize: 13, color: z.color, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>
+          {isDone ? (testResult ? (testResult.auto ? 'Test ended \u2014 that\u2019s your limit' : 'Ramp test complete') : 'Workout complete') : (current.label || z.name)}
+        </div>
+        <div style={{ fontFamily: 'Space Mono, monospace', fontSize: settings.compactLabels ? 52 : 72, fontWeight: 700, color: TEXT, lineHeight: 1 }}>
+          {isDone ? (testResult ? `${testResult.ftp}W` : fmtLong(total)) : fmt(Math.max(0, timeLeft))}
+        </div>
+        <div style={{ fontSize: 16, color: SUB, marginTop: 6 }}>
+          {isDone ? (testResult ? 'Estimated FTP \u2014 saved to your FTP history' : 'Nice work \u2014 log it and recover well.') : targetTxt}
+        </div>
+      </div>
+
+      {isDone && testResult && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+          <button
+            onClick={() => { if (onApplyFtp) onApplyFtp(testResult.ftp); setFtpApplied(true); }}
+            disabled={ftpApplied}
+            style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: ftpApplied ? PANEL2 : 'var(--accent)', color: ftpApplied ? SUB : INK, fontWeight: 700, fontSize: 14, cursor: ftpApplied ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {ftpApplied ? <Check size={16} /> : <Zap size={16} />} {ftpApplied ? 'FTP updated' : `Update my FTP to ${testResult.ftp}W`}
+          </button>
+        </div>
+      )}
+
+      {!isDone && next && settings.showNextPreview && (
+        <div style={{ marginTop: 22, textAlign: 'center', fontSize: 12.5, color: SUB }}>
+          Up next: <span style={{ color: TEXT }}>{next.label}</span> \u00b7 {fmt(next.duration)}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 34 }}>
+        <IconBtn onClick={() => skip(-1)} disabled={currentIndex === 0}><SkipBack size={18} /></IconBtn>
+        <button onClick={isDone ? restart : togglePlay} style={{ width: 68, height: 68, borderRadius: '50%', border: 'none', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          {isDone ? <RotateCcw size={26} color={INK} /> : isPlaying ? <Pause size={26} color={INK} fill={INK} /> : <Play size={26} color={INK} fill={INK} style={{ marginLeft: 3 }} />}
+        </button>
+        <IconBtn onClick={() => skip(1)} disabled={currentIndex === intervals.length - 1}><SkipForward size={18} /></IconBtn>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+        <button onClick={restart} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><RotateCcw size={14} /> Restart</button>
+      </div>
+      <div style={{ textAlign: 'center', marginTop: 20, fontSize: 12, color: SUB }}>
+        Interval {currentIndex + 1} of {intervals.length} \u00b7 {fmt(elapsed)} elapsed \u00b7 {fmt(Math.max(0, total - elapsed))} remaining
+      </div>
+    </div>
+  );
+}
+
+// ---------- settings view ----------
+function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, customWorkouts, onResetCustom, ftpHistory, onClearFtpHistory, onClose, account, daysLeft, subscribed, onLogout, onShowPaywall }) {
+  const [confirmReset, setConfirmReset] = useState(false);
+  const statusColor = trainer.status === 'connected' ? '#8FC93A' : trainer.status === 'connecting' ? '#FF9F40' : trainer.status === 'error' ? RED : SUB;
+  const statusLabel = trainer.status === 'connected' ? `Connected \u00b7 ${trainer.deviceName}` : trainer.status === 'connecting' ? 'Connecting\u2026' : trainer.status === 'error' ? 'Connection failed' : 'Not connected';
+
+  return (
+    <div style={{ padding: '16px 16px 80px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, letterSpacing: 0.3, marginBottom: 2 }}>Settings</div>
+        {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: SUB, cursor: 'pointer', padding: 4 }}><X size={22} /></button>}
+      </div>
+      <div style={{ fontSize: 13, color: SUB, marginBottom: 4 }}>Trainer, sounds and how the app looks.</div>
+
+      <SectionHeader icon={<Bluetooth size={16} color="var(--accent)" />} title="Trainer connectivity" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+        <div style={{ flex: 1, fontSize: 14, color: TEXT }}>{statusLabel}</div>
+        {trainer.status === 'connected' ? (
+          <button onClick={trainer.disconnect} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13, cursor: 'pointer' }}>Disconnect</button>
+        ) : (
+          <button onClick={trainer.connect} disabled={trainer.status === 'connecting'} style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Connect</button>
+        )}
+      </div>
+      {!trainer.supported && (
+        <div style={{ fontSize: 12, color: SUB, marginBottom: 6, lineHeight: 1.5 }}>
+          Bluetooth isn't available here. This works in Chrome on desktop or Android with a trainer that supports the FTMS standard \u2014 not in Safari or iOS.
+        </div>
+      )}
+      {trainer.errorMsg && <div style={{ fontSize: 12, color: RED, marginBottom: 6 }}>{trainer.errorMsg}</div>}
+      <SettingRow label="ERG mode" sub="Trainer auto-sets resistance to match each interval's power target">
+        <Switch checked={settings.ergMode} onChange={v => updateSetting('ergMode', v)} disabled={trainer.status !== 'connected' || !trainer.hasControl} />
+      </SettingRow>
+      <SettingRow label="Auto-pause on disconnect" sub="Pause the timer if the trainer connection drops mid-ride">
+        <Switch checked={settings.autoPauseOnDisconnect} onChange={v => updateSetting('autoPauseOnDisconnect', v)} />
+      </SettingRow>
+
+      <SectionHeader icon={<Volume2 size={16} color="var(--accent)" />} title="Sounds" />
+      <SettingRow label="Interval transition beep"><Switch checked={settings.soundIntervalBeep} onChange={v => updateSetting('soundIntervalBeep', v)} /></SettingRow>
+      <SettingRow label="3-2-1 countdown beep"><Switch checked={settings.soundCountdown} onChange={v => updateSetting('soundCountdown', v)} /></SettingRow>
+      <SettingRow label="Completion sound"><Switch checked={settings.soundCompletion} onChange={v => updateSetting('soundCompletion', v)} /></SettingRow>
+      <div style={{ padding: '10px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: TEXT, marginBottom: 6 }}>
+          <span>Volume</span><span style={{ color: SUB }}>{Math.round(settings.soundVolume * 100)}%</span>
+        </div>
+        <input type="range" min={0} max={1} step={0.05} value={settings.soundVolume}
+          onChange={e => updateSetting('soundVolume', Number(e.target.value))}
+          style={{ width: '100%', accentColor: settings.accentColor }} />
+      </div>
+
+      <SectionHeader icon={<Sun size={16} color="var(--accent)" />} title="Visuals" />
+      <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
+        <div style={{ fontSize: 14, color: TEXT, marginBottom: 8 }}>Accent colour</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {ACCENT_PRESETS.map(p => (
+            <button key={p.value} onClick={() => updateSetting('accentColor', p.value)}
+              style={{ width: 36, height: 36, borderRadius: '50%', background: p.value, border: settings.accentColor === p.value ? `2px solid ${TEXT}` : '2px solid transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              title={p.name}>
+              {settings.accentColor === p.value && <Check size={16} color={INK} />}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
+        <div style={{ fontSize: 14, color: TEXT, marginBottom: 8 }}>Interval targets show as</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Chip active={settings.targetDisplay === 'both'} onClick={() => updateSetting('targetDisplay', 'both')}>Watts + % FTP</Chip>
+          <Chip active={settings.targetDisplay === 'watts'} onClick={() => updateSetting('targetDisplay', 'watts')}>Watts only</Chip>
+          <Chip active={settings.targetDisplay === 'percent'} onClick={() => updateSetting('targetDisplay', 'percent')}>% FTP only</Chip>
+        </div>
+      </div>
+      <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
+        <div style={{ fontSize: 14, color: TEXT, marginBottom: 2 }}>Default orientation</div>
+        <div style={{ fontSize: 12, color: SUB, marginBottom: 8, lineHeight: 1.5 }}>
+          Landscape is recommended \u2014 it's designed for a device mounted on your bars. Portrait works but some screens will feel cramped or stretched.
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Chip active={settings.preferredOrientation === 'landscape'} onClick={() => updateSetting('preferredOrientation', 'landscape')}>Landscape (recommended)</Chip>
+          <Chip active={settings.preferredOrientation === 'portrait'} onClick={() => updateSetting('preferredOrientation', 'portrait')}>Portrait</Chip>
+        </div>
+      </div>
+      <SettingRow label="Show next interval preview"><Switch checked={settings.showNextPreview} onChange={v => updateSetting('showNextPreview', v)} /></SettingRow>
+      <SettingRow label="Compact timer" sub="Smaller countdown digits during a workout"><Switch checked={settings.compactLabels} onChange={v => updateSetting('compactLabels', v)} /></SettingRow>
+      <SettingRow label="Keep screen awake" sub="Prevent the screen from sleeping while riding"><Switch checked={settings.keepAwake} onChange={v => updateSetting('keepAwake', v)} /></SettingRow>
+
+      {account && (
+        <>
+          <SectionHeader icon={<Zap size={16} color="var(--accent)" />} title="Account & subscription" />
+          <SettingRow label={account.name} sub={account.email}>
+            <button onClick={onLogout} style={{ padding: '7px 12px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, cursor: 'pointer' }}>Log out</button>
+          </SettingRow>
+          <SettingRow label={subscribed ? 'Monthly plan \u2014 active' : `Free trial \u2014 ${daysLeft} day${daysLeft === 1 ? '' : 's'} left`} sub={subscribed ? MONTHLY_PRICE_LABEL : 'No charge yet in this demo'}>
+            {!subscribed && (
+              <button onClick={onShowPaywall} style={{ padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>Upgrade now</button>
+            )}
+          </SettingRow>
+        </>
+      )}
+
+      <SectionHeader icon={<Gauge size={16} color="var(--accent)" />} title="General" />
+      <SettingRow label="FTP" sub="Used to calculate watt targets from % FTP">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="number" value={ftp} onChange={e => setFtp(Math.max(50, Number(e.target.value) || 0))}
+            style={{ width: 70, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '6px 8px', fontSize: 14 }} />
+          <span style={{ fontSize: 13, color: SUB }}>W</span>
+        </div>
+      </SettingRow>
+      {ftpHistory && ftpHistory.length > 0 && (
+        <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 14, color: TEXT }}>FTP test history</div>
+            <button onClick={onClearFtpHistory} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Trash2 size={12} /> Clear
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {ftpHistory.slice().reverse().slice(0, 10).map(entry => (
+              <div key={entry.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: PANEL, borderRadius: 8, padding: '8px 10px' }}>
+                <div>
+                  <div style={{ fontSize: 13.5, color: TEXT, fontWeight: 600 }}>{entry.ftp}W</div>
+                  <div style={{ fontSize: 11.5, color: SUB }}>{entry.source}</div>
+                </div>
+                <div style={{ fontSize: 11.5, color: SUB }}>{new Date(entry.date).toLocaleDateString()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <SettingRow label="Custom workouts saved" sub={`${customWorkouts.length} workout${customWorkouts.length === 1 ? '' : 's'}`}>
+        {!confirmReset ? (
+          <button onClick={() => setConfirmReset(true)} disabled={customWorkouts.length === 0}
+            style={{ padding: '7px 12px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: customWorkouts.length === 0 ? '#4a4f56' : RED, fontSize: 12.5, cursor: customWorkouts.length === 0 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw size={13} /> Clear all
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => { onResetCustom(); setConfirmReset(false); }} style={{ padding: '7px 10px', borderRadius: 8, border: 'none', background: RED, color: '#fff', fontSize: 12.5, cursor: 'pointer' }}>Confirm</button>
+            <button onClick={() => setConfirmReset(false)} style={{ padding: '7px 10px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        )}
+      </SettingRow>
+    </div>
+  );
+}
+
+// ---------- auth screens ----------
+function AuthShell({ children, footer }) {
+  return (
+    <div style={{ minHeight: '100%', background: INK, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px 20px', fontFamily: 'Inter, sans-serif' }}>
+      <div style={{ maxWidth: 380, width: '100%', margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 28 }}>
+          <Zap size={22} color="var(--accent)" />
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.4 }}>Turbo Trainer</div>
+        </div>
+        {children}
+        {footer && <div style={{ marginTop: 18, textAlign: 'center' }}>{footer}</div>}
+      </div>
+    </div>
+  );
+}
+function AuthField({ label, ...props }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: 'block', fontSize: 12.5, color: SUB, marginBottom: 5 }}>{label}</label>
+      <input {...props} style={{ width: '100%', background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '11px 12px', fontSize: 14.5, boxSizing: 'border-box' }} />
+    </div>
+  );
+}
+function AuthError({ children }) {
+  if (!children) return null;
+  return <div style={{ background: 'rgba(255,77,77,0.1)', border: `1px solid ${RED}`, color: RED, borderRadius: 8, padding: '9px 12px', fontSize: 13, marginBottom: 12 }}>{children}</div>;
+}
+function AuthNote({ children }) {
+  return <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 12px', fontSize: 12, color: SUB, marginBottom: 12, lineHeight: 1.5 }}>{children}</div>;
+}
+function SocialAuthButtons({ onMock }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <button onClick={() => onMock('Google')} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Continue with Google</button>
+      <button onClick={() => onMock('Apple')} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Continue with Apple</button>
+    </div>
+  );
+}
+
+function LoginView({ onLogin, goSignup, goForgot }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [socialMsg, setSocialMsg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    if (!isValidEmail(email)) { setError('Enter a valid email address.'); return; }
+    if (!password) { setError('Enter your password.'); return; }
+    setSubmitting(true);
+    const result = await onLogin(email.trim().toLowerCase(), password);
+    setSubmitting(false);
+    if (result && result.error) setError(result.error);
+  }
+
+  return (
+    <AuthShell footer={
+      <div style={{ fontSize: 13, color: SUB }}>
+        New here? <button onClick={goSignup} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Start your free trial</button>
+      </div>
+    }>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 16, textAlign: 'center' }}>Log in</div>
+      <AuthError>{error}</AuthError>
+      {socialMsg && <AuthNote>{socialMsg}</AuthNote>}
+      <SocialAuthButtons onMock={(p) => setSocialMsg(`${p} sign-in isn't wired up yet \u2014 it needs a separate OAuth setup in Supabase. Use email + password below instead.`)} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px', color: SUB, fontSize: 11.5 }}>
+        <div style={{ flex: 1, height: 1, background: LINE }} /> OR <div style={{ flex: 1, height: 1, background: LINE }} />
+      </div>
+      <form onSubmit={submit}>
+        <AuthField label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
+        <AuthField label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" autoComplete="current-password" />
+        <div style={{ textAlign: 'right', marginBottom: 16 }}>
+          <button type="button" onClick={goForgot} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12.5, cursor: 'pointer', padding: 0 }}>Forgot password?</button>
+        </div>
+        <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Logging in\u2026' : 'Log in'}</button>
+      </form>
+    </AuthShell>
+  );
+}
+
+function SignupView({ onSignup, goLogin }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [socialMsg, setSocialMsg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmSent, setConfirmSent] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    if (!name.trim()) { setError('Enter your name.'); return; }
+    if (!isValidEmail(email)) { setError('Enter a valid email address.'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+    if (password !== confirm) { setError('Passwords don\u2019t match.'); return; }
+    setSubmitting(true);
+    const result = await onSignup(name.trim(), email.trim().toLowerCase(), password);
+    setSubmitting(false);
+    if (result && result.error) { setError(result.error); return; }
+    if (result && result.needsConfirmation) { setConfirmSent(true); return; }
+  }
+
+  if (confirmSent) {
+    return (
+      <AuthShell footer={
+        <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Back to log in</button>
+      }>
+        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8, textAlign: 'center' }}>Check your email</div>
+        <AuthNote>We've sent a confirmation link to {email}. Click it, then come back here and log in to start your {TRIAL_DAYS}-day free trial.</AuthNote>
+      </AuthShell>
+    );
+  }
+
+  return (
+    <AuthShell footer={
+      <div style={{ fontSize: 13, color: SUB }}>
+        Already have an account? <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Log in</button>
+      </div>
+    }>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 4, textAlign: 'center' }}>Start your free trial</div>
+      <div style={{ fontSize: 12.5, color: SUB, textAlign: 'center', marginBottom: 16 }}>{TRIAL_DAYS} days free, then {MONTHLY_PRICE_LABEL}. Cancel anytime.</div>
+      <AuthError>{error}</AuthError>
+      {socialMsg && <AuthNote>{socialMsg}</AuthNote>}
+      <SocialAuthButtons onMock={(p) => setSocialMsg(`${p} sign-up isn't wired up yet \u2014 it needs a separate OAuth setup in Supabase. Use the form below instead.`)} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px', color: SUB, fontSize: 11.5 }}>
+        <div style={{ flex: 1, height: 1, background: LINE }} /> OR <div style={{ flex: 1, height: 1, background: LINE }} />
+      </div>
+      <form onSubmit={submit}>
+        <AuthField label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="name" />
+        <AuthField label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
+        <AuthField label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
+        <AuthField label="Confirm password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Re-enter password" autoComplete="new-password" />
+        <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', marginTop: 4, opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Creating account\u2026' : 'Start free trial'}</button>
+        <div style={{ fontSize: 11, color: SUB, textAlign: 'center', marginTop: 10, lineHeight: 1.5 }}>No payment required today. We'll ask for card details only when your trial ends.</div>
+      </form>
+    </AuthShell>
+  );
+}
+
+function ForgotPasswordView({ onReset, goLogin }) {
+  const [email, setEmail] = useState('');
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    if (!isValidEmail(email)) { setError('Enter a valid email address.'); return; }
+    setSubmitting(true);
+    await onReset(email.trim().toLowerCase());
+    setSubmitting(false);
+    setSent(true);
+  }
+
+  return (
+    <AuthShell footer={
+      <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Back to log in</button>
+    }>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8, textAlign: 'center' }}>Reset your password</div>
+      {sent ? (
+        <AuthNote>If an account exists for that email, we've just sent a real password reset link to it. Click the link in that email to set a new password.</AuthNote>
+      ) : (
+        <>
+          <div style={{ fontSize: 12.5, color: SUB, textAlign: 'center', marginBottom: 16 }}>Enter your email and we'll send you a link to reset your password.</div>
+          <AuthError>{error}</AuthError>
+          <form onSubmit={submit}>
+            <AuthField label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
+            <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Sending\u2026' : 'Send reset link'}</button>
+          </form>
+        </>
+      )}
+    </AuthShell>
+  );
+}
+
+function UpdatePasswordView({ onUpdate }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+    if (password !== confirm) { setError('Passwords don\u2019t match.'); return; }
+    setSubmitting(true);
+    const result = await onUpdate(password);
+    setSubmitting(false);
+    if (result && result.error) setError(result.error);
+  }
+
+  return (
+    <AuthShell>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 4, textAlign: 'center' }}>Set a new password</div>
+      <div style={{ fontSize: 12.5, color: SUB, textAlign: 'center', marginBottom: 16 }}>You followed a password reset link. Choose a new password below.</div>
+      <AuthError>{error}</AuthError>
+      <form onSubmit={submit}>
+        <AuthField label="New password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
+        <AuthField label="Confirm new password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Re-enter password" autoComplete="new-password" />
+        <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Saving\u2026' : 'Save new password'}</button>
+      </form>
+    </AuthShell>
+  );
+}
+
+// ---------- trial banner + paywall ----------
+function TrialBanner({ daysLeft, onUpgrade }) {
+  return (
+    <div style={{ background: PANEL, borderBottom: `1px solid ${LINE}`, padding: '9px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12.5 }}>
+      <span style={{ color: SUB }}>
+        <span style={{ color: TEXT, fontWeight: 600 }}>{daysLeft} day{daysLeft === 1 ? '' : 's'}</span> left in your free trial
+      </span>
+      <button onClick={onUpgrade} style={{ background: 'none', border: `1px solid var(--accent)`, color: 'var(--accent)', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>Upgrade</button>
+    </div>
+  );
+}
+
+function PaywallView({ blocking, trialExpired, onSubscribe, onClose, onLogout }) {
+  const [cardName, setCardName] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [expiry, setExpiry] = useState('');
+  const [cvc, setCvc] = useState('');
+  const [error, setError] = useState('');
+  const [processing, setProcessing] = useState(false);
+
+  function submit(e) {
+    e.preventDefault();
+    setError('');
+    if (!cardName.trim()) { setError('Enter the name on your card.'); return; }
+    if (cardNumber.replace(/\s/g, '').length < 12) { setError('Enter a valid card number.'); return; }
+    if (!/^\d{2}\/\d{2}$/.test(expiry)) { setError('Expiry should be MM/YY.'); return; }
+    if (cvc.length < 3) { setError('Enter a valid CVC.'); return; }
+    setProcessing(true);
+    setTimeout(() => { setProcessing(false); onSubscribe(); }, 700); // simulated \u2014 no real charge happens
+  }
+
+  const body = (
+    <div style={{ maxWidth: 420, width: '100%', margin: '0 auto', padding: '20px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 18 }}>
+        <Zap size={20} color="var(--accent)" />
+        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT }}>{trialExpired ? 'Your free trial has ended' : 'Upgrade to keep riding'}</div>
+      </div>
+      <div style={{ fontSize: 13, color: SUB, textAlign: 'center', marginBottom: 20 }}>
+        {trialExpired ? 'Subscribe to keep access to your workouts and the trainer connection.' : 'Lock in your subscription now so there\u2019s no interruption when your trial ends.'}
+      </div>
+
+      <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 16, marginBottom: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>Turbo Trainer \u2014 Monthly</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)' }}>{MONTHLY_PRICE_LABEL}</div>
+        </div>
+        <div style={{ fontSize: 12, color: SUB, lineHeight: 1.6 }}>
+          Full workout library \u00b7 Custom workout builder \u00b7 Trainer &amp; sensor connectivity \u00b7 FTP testing &amp; history
+        </div>
+      </div>
+
+      <AuthNote>Demo payment form \u2014 no real charge is made and no card details leave this screen. A live app needs a real processor (e.g. Stripe) or Apple/Google in-app purchase if sold through their app stores.</AuthNote>
+      <AuthError>{error}</AuthError>
+
+      <form onSubmit={submit}>
+        <AuthField label="Name on card" value={cardName} onChange={e => setCardName(e.target.value)} placeholder="Jane Rider" />
+        <AuthField label="Card number" value={cardNumber} onChange={e => setCardNumber(e.target.value)} placeholder="4242 4242 4242 4242" inputMode="numeric" />
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}><AuthField label="Expiry" value={expiry} onChange={e => setExpiry(e.target.value)} placeholder="MM/YY" /></div>
+          <div style={{ flex: 1 }}><AuthField label="CVC" value={cvc} onChange={e => setCvc(e.target.value)} placeholder="123" inputMode="numeric" /></div>
+        </div>
+        <button type="submit" disabled={processing} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: processing ? 'default' : 'pointer', marginTop: 6, opacity: processing ? 0.7 : 1 }}>
+          {processing ? 'Processing\u2026' : `Subscribe \u2014 ${MONTHLY_PRICE_LABEL}`}
+        </button>
+      </form>
+
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
+        {!blocking && <button onClick={onClose} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12.5, cursor: 'pointer' }}>Not now</button>}
+        <button onClick={onLogout} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12.5, cursor: 'pointer' }}>Log out</button>
+      </div>
+    </div>
+  );
+
+  if (!blocking) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+        <div onClick={e => e.stopPropagation()} style={{ background: INK, width: '100%', maxWidth: 520, borderRadius: '18px 18px 0 0', border: `1px solid ${LINE}`, borderBottom: 'none', padding: '10px 20px 24px', maxHeight: '90vh', overflowY: 'auto' }}>
+          {body}
+        </div>
+      </div>
+    );
+  }
+  return <div style={{ minHeight: '100%', background: INK, padding: '20px 20px 40px', fontFamily: 'Inter, sans-serif' }}>{body}</div>;
+}
+
+// ---------- orientation gate ----------
+function useOrientation() {
+  const [isPortrait, setIsPortrait] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(orientation: portrait)').matches : false));
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(orientation: portrait)');
+    const handler = e => setIsPortrait(e.matches);
+    if (mq.addEventListener) mq.addEventListener('change', handler); else mq.addListener(handler);
+    return () => { if (mq.removeEventListener) mq.removeEventListener('change', handler); else mq.removeListener(handler); };
+  }, []);
+  return isPortrait;
+}
+
+function OrientationGate({ preferredOrientation, children }) {
+  const isPortrait = useOrientation();
+  const [dismissed, setDismissed] = useState(false);
+
+  // Best-effort real lock: only works in some installed/fullscreen Android
+  // Chrome contexts. iOS Safari does not support the Orientation Lock API
+  // at all, so this is a courtesy overlay + toggle, not a hard guarantee.
+  useEffect(() => {
+    try {
+      if (preferredOrientation === 'landscape' && screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(() => {});
+      }
+    } catch (e) {}
+  }, [preferredOrientation]);
+
+  const showPrompt = preferredOrientation === 'landscape' && isPortrait && !dismissed;
+
+  return (
+    <>
+      {children}
+      {showPrompt && (
+        <div style={{ position: 'fixed', inset: 0, background: INK, zIndex: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 28, textAlign: 'center' }}>
+          <div style={{ fontSize: 42, marginBottom: 14, transform: 'rotate(90deg)' }}>\ud83d\udcf1</div>
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8 }}>Rotate your device</div>
+          <div style={{ fontSize: 13.5, color: SUB, maxWidth: 320, lineHeight: 1.6, marginBottom: 22 }}>
+            This app is designed for landscape \u2014 it's easier to read your timer and chart when your device is mounted on the bars. Turn your device sideways for the best experience.
+          </div>
+          <button onClick={() => setDismissed(true)} style={{ padding: '11px 20px', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13.5, cursor: 'pointer' }}>
+            Continue in portrait anyway
+          </button>
+          <div style={{ fontSize: 11.5, color: SUB, marginTop: 10, maxWidth: 280 }}>Some screens may look cramped or stretched in portrait. You can change your default under Settings \u2192 Visuals.</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------- app ----------
+export default function App() {
+  const [view, setView] = useState('library');
+  const [preSettingsView, setPreSettingsView] = useState('library');
+  const [ftp, setFtpState] = useState(200);
+  const [settings, setSettingsState] = useState(DEFAULT_SETTINGS);
+  const [customWorkouts, setCustomWorkouts] = useState([]);
+  const [ftpHistory, setFtpHistory] = useState([]);
+  const [detailWorkout, setDetailWorkout] = useState(null);
+  const [editingWorkout, setEditingWorkout] = useState(null);
+  const [activeWorkout, setActiveWorkout] = useState(null);
+  const trainer = useTrainer();
+
+  // ---- account / trial / subscription, backed by Supabase ----
+  const [user, setUser] = useState(null); // Supabase auth user (id, email, ...)
+  const [profile, setProfile] = useState(null); // row from public.profiles for this user
+  const [authLoading, setAuthLoading] = useState(true); // checking for an existing session
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false); // arrived via a "reset password" email link
+  const [authScreen, setAuthScreen] = useState('login'); // 'login' | 'signup' | 'forgot'
+  const [showPaywallModal, setShowPaywallModal] = useState(false);
+
+  // Watch for an existing/changing Supabase session (login, logout, token
+  // refresh, or arriving here from a "reset your password" email link).
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
+      setUser(session ? session.user : null);
+      setAuthLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
+      setUser(session ? session.user : null);
+      setAuthLoading(false);
+    });
+    return () => { mounted = false; listener.subscription.unsubscribe(); };
+  }, []);
+
+  // Once we know who's logged in, load their profile + saved data from the database.
+  useEffect(() => {
+    if (!user) { setProfile(null); setCustomWorkouts([]); setFtpHistory([]); return; }
+    let mounted = true;
+    (async () => {
+      setProfileLoading(true);
+      let { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+      if (!prof) {
+        // Fallback in case the sign-up trigger hasn't caught up yet.
+        const { data: created } = await supabase.from('profiles')
+          .insert({ id: user.id, name: user.user_metadata?.name || '', trial_start: new Date().toISOString() })
+          .select().maybeSingle();
+        prof = created;
+      }
+      if (!mounted) return;
+      if (prof) {
+        setProfile(prof);
+        setFtpState(prof.ftp || 200);
+        setSettingsState({ ...DEFAULT_SETTINGS, ...(prof.settings || {}) });
+      }
+      const { data: workouts } = await supabase.from('custom_workouts').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
+      if (mounted && workouts) setCustomWorkouts(workouts.map(w => w.workout));
+      const { data: history } = await supabase.from('ftp_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
+      if (mounted && history) setFtpHistory(history.map(h => ({ id: h.id, date: h.date, ftp: h.ftp, source: h.source })));
+      if (mounted) setProfileLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [user]);
+
+  // ftp/settings are kept as simple local state (so the rest of the app is
+  // unchanged) but every update is also pushed to the person's profile row.
+  function setFtp(value) {
+    setFtpState(value);
+    if (user) supabase.from('profiles').update({ ftp: value }).eq('id', user.id).then(() => {});
+  }
+  function updateSetting(key, value) {
+    setSettingsState(s => {
+      const next = { ...s, [key]: value };
+      if (user) supabase.from('profiles').update({ settings: next }).eq('id', user.id).then(() => {});
+      return next;
+    });
+  }
+
+  async function handleSignup(name, email, password) {
+    const { data, error } = await supabase.auth.signUp({
+      email, password,
+      options: { data: { name }, emailRedirectTo: window.location.origin },
+    });
+    if (error) return { error: error.message };
+    if (!data.session) return { needsConfirmation: true }; // this Supabase project requires email confirmation
+    return {};
+  }
+  async function handleLogin(email, password) {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: error.message };
+    return {};
+  }
+  function handleLogout() {
+    supabase.auth.signOut();
+    setShowPaywallModal(false);
+    setAuthScreen('login');
+  }
+  async function handleForgotPassword(email) {
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  }
+  async function handleUpdatePassword(newPassword) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) return { error: error.message };
+    setRecoveryMode(false);
+    return {};
+  }
+  async function handleSubscribe() {
+    if (user) await supabase.from('profiles').update({ subscribed: true }).eq('id', user.id);
+    setProfile(p => (p ? { ...p, subscribed: true } : p));
+    setShowPaywallModal(false);
+  }
+
+  // Called by the player whenever an FTP test finishes (either the rider
+  // stalled and the app ended it automatically, or they rode it to the end).
+  function recordFtpResult(value, source) {
+    const entry = { id: newId(), date: new Date().toISOString(), ftp: value, source };
+    setFtpHistory(list => [...list, entry]);
+    if (user) supabase.from('ftp_history').insert({ id: entry.id, user_id: user.id, ftp: value, source, date: entry.date }).then(() => {});
+  }
+  function clearFtpHistory() {
+    setFtpHistory([]);
+    if (user) supabase.from('ftp_history').delete().eq('user_id', user.id).then(() => {});
+  }
+
+  function saveCustomWorkout(workout) {
+    setCustomWorkouts(list => {
+      const exists = list.some(w => w.id === workout.id);
+      const next = exists ? list.map(w => (w.id === workout.id ? workout : w)) : [...list, workout];
+      return next;
+    });
+    if (user) supabase.from('custom_workouts').upsert({ id: workout.id, user_id: user.id, workout }).then(() => {});
+    setView('library');
+  }
+  function deleteCustomWorkout(id) {
+    setCustomWorkouts(list => list.filter(w => w.id !== id));
+    if (user) supabase.from('custom_workouts').delete().eq('id', id).eq('user_id', user.id).then(() => {});
+    setDetailWorkout(null);
+  }
+  function resetCustomWorkouts() {
+    setCustomWorkouts([]);
+    if (user) supabase.from('custom_workouts').delete().eq('user_id', user.id).then(() => {});
+  }
+
+  const globalStyle = "@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Space+Mono:wght@700&family=Inter:wght@400;500;600&display=swap'); input:focus, select:focus { outline: 1px solid var(--accent); } ::-webkit-scrollbar { width: 4px; height: 4px; } ::-webkit-scrollbar-thumb { background: " + LINE + "; border-radius: 4px; }";
+  const wrapStyle = { '--accent': settings.accentColor, background: INK, minHeight: '100%', fontFamily: 'Inter, sans-serif' };
+
+  if (authLoading) {
+    return <div style={wrapStyle}><style>{globalStyle}</style></div>;
+  }
+
+  // ---- arrived via a "reset your password" email link ----
+  if (recoveryMode) {
+    return (
+      <div style={wrapStyle}>
+        <style>{globalStyle}</style>
+        <UpdatePasswordView onUpdate={handleUpdatePassword} />
+      </div>
+    );
+  }
+
+  // ---- gate 1: not logged in \u2192 auth flow ----
+  if (!user) {
+    return (
+      <div style={wrapStyle}>
+        <style>{globalStyle}</style>
+        {authScreen === 'login' && <LoginView onLogin={handleLogin} goSignup={() => setAuthScreen('signup')} goForgot={() => setAuthScreen('forgot')} />}
+        {authScreen === 'signup' && <SignupView onSignup={handleSignup} goLogin={() => setAuthScreen('login')} />}
+        {authScreen === 'forgot' && <ForgotPasswordView onReset={handleForgotPassword} goLogin={() => setAuthScreen('login')} />}
+      </div>
+    );
+  }
+
+  if (profileLoading || !profile) {
+    return <div style={wrapStyle}><style>{globalStyle}</style></div>;
+  }
+
+  const account = { name: profile.name || user.user_metadata?.name || 'Rider', email: user.email };
+  const subscribed = !!profile.subscribed;
+  const daysLeft = daysLeftInTrial(profile.trial_start);
+  const trialExpired = daysLeft <= 0;
+
+  // ---- gate 2: trial over and never subscribed \u2192 blocking paywall ----
+  if (trialExpired && !subscribed) {
+    return (
+      <div style={wrapStyle}>
+        <style>{globalStyle}</style>
+        <PaywallView blocking trialExpired onSubscribe={handleSubscribe} onLogout={handleLogout} />
+      </div>
+    );
+  }
+
+  if (activeWorkout) {
+    return (
+      <div style={wrapStyle}>
+        <style>{globalStyle}</style>
+        <OrientationGate preferredOrientation={settings.preferredOrientation}>
+          <PlayerView workout={activeWorkout} ftp={ftp} settings={settings} trainer={trainer} onExit={() => setActiveWorkout(null)} onSaveFtpResult={recordFtpResult} onApplyFtp={setFtp} />
+        </OrientationGate>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ ...wrapStyle, position: 'relative', paddingBottom: 54 }}>
+      <style>{globalStyle}</style>
+      <OrientationGate preferredOrientation={settings.preferredOrientation}>
+        {!subscribed && <TrialBanner daysLeft={daysLeft} onUpgrade={() => setShowPaywallModal(true)} />}
+
+        <div style={{ position: 'fixed', top: subscribed ? 0 : 40, left: 0, right: 0, maxWidth: 520, margin: '0 auto', display: 'flex', justifyContent: 'flex-end', padding: '14px 16px 0', pointerEvents: 'none', zIndex: 30, transition: 'top .15s' }}>
+          <button onClick={() => { setPreSettingsView(view); setView('settings'); }} style={{
+            pointerEvents: 'auto', width: 38, height: 38, borderRadius: '50%', border: `1px solid ${LINE}`,
+            background: 'rgba(29,33,38,0.94)', color: view === 'settings' ? 'var(--accent)' : TEXT,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
+          }}>
+            <SettingsIcon size={18} />
+          </button>
+        </div>
+
+        {view === 'library' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} />}
+        {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" />}
+        {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" />}
+        {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
+        {view === 'settings' && (
+          <SettingsView
+            settings={settings} updateSetting={updateSetting} ftp={ftp} setFtp={setFtp} trainer={trainer}
+            customWorkouts={customWorkouts} onResetCustom={resetCustomWorkouts} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory}
+            onClose={() => setView(preSettingsView)}
+            account={account} daysLeft={daysLeft} subscribed={subscribed} onLogout={handleLogout} onShowPaywall={() => setShowPaywallModal(true)}
+          />
+        )}
+
+        {detailWorkout && (
+          <WorkoutDetail
+            workout={detailWorkout} ftp={ftp} setFtp={setFtp} settings={settings}
+            isCustom={customWorkouts.some(w => w.id === detailWorkout.id)}
+            onClose={() => setDetailWorkout(null)}
+            onStart={(w) => { setActiveWorkout(w); setDetailWorkout(null); }}
+            onEdit={() => { setEditingWorkout(detailWorkout); setDetailWorkout(null); setView('builder'); }}
+            onDelete={() => deleteCustomWorkout(detailWorkout.id)}
+            onSaveScaled={(w) => { saveCustomWorkout(w); setDetailWorkout(null); }}
+          />
+        )}
+
+        {showPaywallModal && (
+          <PaywallView onSubscribe={handleSubscribe} onClose={() => setShowPaywallModal(false)} onLogout={handleLogout} />
+        )}
+
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(20,23,26,0.96)', borderTop: `1px solid ${LINE}`, display: 'flex', maxWidth: 520, margin: '0 auto' }}>
+          <button onClick={() => setView('library')} style={{ flex: 1, padding: '8px 0', background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'library' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
+            <Library size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Library</span>
+          </button>
+          <button onClick={() => setView('basics')} style={{ flex: 1, padding: '8px 0', background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'basics' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
+            <Dumbbell size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Basics</span>
+          </button>
+          <button onClick={() => setView('rides')} style={{ flex: 1, padding: '8px 0', background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'rides' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
+            <Bike size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Rides</span>
+          </button>
+          <button onClick={() => { setEditingWorkout(null); setView('builder'); }} style={{ flex: 1, padding: '8px 0', background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'builder' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
+            <Wrench size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Builder</span>
+          </button>
+        </div>
+      </OrientationGate>
+    </div>
+  );
+}
