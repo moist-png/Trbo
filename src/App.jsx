@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Play, Pause, SkipForward, SkipBack, RotateCcw, X, Plus, Trash2, ChevronUp, ChevronDown,
+  Play, Pause, SkipForward, SkipBack, RotateCcw, X, Plus, Trash2, ChevronUp, ChevronDown, ChevronRight,
   Search, Library, Wrench, Gauge, Save, Edit3, Copy, Settings as SettingsIcon, Bluetooth,
-  BluetoothOff, Volume2, Sun, Moon, RefreshCw, Check, Zap, ChevronDown as ChevDown, Bike, Dumbbell,
+  BluetoothOff, Volume2, Sun, Moon, RefreshCw, Check, Zap, ChevronDown as ChevDown, Bike, Dumbbell, Home,
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -459,6 +459,36 @@ function smartScaleWorkout(originalIntervals, targetSeconds, repeatWholeCore) {
 // ---------- preloaded library ----------
 const LIBRARY = [
   {
+    id: 'ramp-ftp-test', name: 'Ramp FTP test', category: 'Basics',
+    description: 'Power climbs a little every minute until you can\u2019t hold it \u2014 no long steady effort needed.',
+    notes: 'Ride until you can no longer hold the target power. If a trainer is connected, the app will notice when you fall off the pace and end the test for you automatically, then estimate your FTP. Without a trainer connected, stop yourself, find the last full minute you completed, take its power, and multiply by 0.75 \u2014 that\u2019s your new FTP, update it in Settings.',
+    autoStopTest: true,
+    ftpMultiplier: 0.75,
+    fixedLength: true,
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      ...Array.from({ length: 21 }, (_, i) => iv(i === 20 ? 'Max effort' : 'Ramp step', 60, 'power', 50 + i * 5)),
+      iv('Cool down', 300, 'power', 50),
+    ],
+  },
+  {
+    id: 'ftp-test-20', name: '20 minute FTP test', category: 'Basics',
+    description: 'The standard test protocol for finding your current FTP.',
+    notes: 'After the 20 minute effort, take your average power for that block and multiply by 0.95. That number is your new FTP \u2014 update it in Settings.',
+    fixedLength: true,
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
+      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
+      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
+      iv('Easy spin', 300, 'power', 50),
+      iv('Primer effort', 300, 'rpe', 9),
+      iv('Recovery', 600, 'power', 50),
+      iv('20 minute test', 1200, 'rpe', 10),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  {
     id: 'endurance-hour', name: 'Steady endurance hour', category: 'Basics',
     description: 'Long steady aerobic ride to build your base.',
     intervals: [iv('Warm up', 300, 'power', 55), iv('Endurance', 2400, 'power', 68), iv('Cool down', 300, 'power', 50)],
@@ -522,36 +552,6 @@ const LIBRARY = [
     id: 'mixed-metric', name: 'Mixed metric session', category: 'Basics',
     description: 'Power, RPE and free riding in one workout.',
     intervals: [iv('Warm up', 480, 'power', 60), iv('Sweet spot', 600, 'power', 90), iv('Ride how you feel', 300, 'free', null), iv('Hard effort', 240, 'rpe', 8), iv('Sprint', 30, 'rpe', 10), iv('Recovery', 90, 'free', null), iv('Endurance', 600, 'power', 70), iv('Cool down', 360, 'power', 50)],
-  },
-  {
-    id: 'ftp-test-20', name: '20 minute FTP test', category: 'Basics',
-    description: 'The standard test protocol for finding your current FTP.',
-    notes: 'After the 20 minute effort, take your average power for that block and multiply by 0.95. That number is your new FTP \u2014 update it in Settings.',
-    fixedLength: true,
-    intervals: [
-      iv('Warm up', 600, 'power', 55),
-      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
-      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
-      iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
-      iv('Easy spin', 300, 'power', 50),
-      iv('Primer effort', 300, 'rpe', 9),
-      iv('Recovery', 600, 'power', 50),
-      iv('20 minute test', 1200, 'rpe', 10),
-      iv('Cool down', 600, 'power', 50),
-    ],
-  },
-  {
-    id: 'ramp-ftp-test', name: 'Ramp FTP test', category: 'Basics',
-    description: 'Power climbs a little every minute until you can\u2019t hold it \u2014 no long steady effort needed.',
-    notes: 'Ride until you can no longer hold the target power. If a trainer is connected, the app will notice when you fall off the pace and end the test for you automatically, then estimate your FTP. Without a trainer connected, stop yourself, find the last full minute you completed, take its power, and multiply by 0.75 \u2014 that\u2019s your new FTP, update it in Settings.',
-    autoStopTest: true,
-    ftpMultiplier: 0.75,
-    fixedLength: true,
-    intervals: [
-      iv('Warm up', 600, 'power', 55),
-      ...Array.from({ length: 21 }, (_, i) => iv(i === 20 ? 'Max effort' : 'Ramp step', 60, 'power', 50 + i * 5)),
-      iv('Cool down', 300, 'power', 50),
-    ],
   },
   {
     id: 'vo2-40-20-double', name: 'VO2 max 40/20 \u00d7 13 (2 sets)', category: 'Basics',
@@ -1438,6 +1438,24 @@ function SectionHeader({ icon, title }) {
   );
 }
 
+// A quick yes/no dialog for interrupting a destructive action \u2014 distinct
+// from the bigger bottom sheets (WorkoutDetail, PaywallView) which are for
+// browsing content rather than confirming a single choice.
+function ConfirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', onConfirm, onCancel, danger }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} style={{ background: BG, border: `1px solid ${LINE}`, borderRadius: 16, padding: 22, width: '100%', maxWidth: 340, textAlign: 'center' }}>
+        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, fontWeight: 600, color: TEXT, marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 13.5, color: SUB, lineHeight: 1.6, marginBottom: 20 }}>{message}</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: '11px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>{cancelLabel}</button>
+          <button onClick={onConfirm} style={{ flex: 1, padding: '11px 0', borderRadius: 10, border: 'none', background: danger ? RED : 'var(--accent)', color: danger ? '#fff' : INK, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- workout detail sheet ----------
 function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdit, isCustom, onDelete, onSaveScaled }) {
   const originalTotal = totalDuration(workout.intervals);
@@ -1539,6 +1557,111 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- home / welcome screen ----------
+const HOME_TILES = [
+  { key: 'basics', label: 'Workouts', caption: 'Structured sessions', icon: Dumbbell },
+  { key: 'rides', label: 'Rides', caption: 'Long, mixed-terrain', icon: Bike },
+  { key: 'builder', label: 'Builder', caption: 'Build your own', icon: Wrench },
+  { key: 'ftp', label: 'FTP', caption: 'Test & track', icon: Gauge },
+];
+
+function HomeView({ account, onNavigate }) {
+  const hour = new Date().getHours();
+  const greeting = hour < 5 ? 'Late one' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const firstName = (account && account.name ? account.name.split(' ')[0] : '') || 'Rider';
+
+  return (
+    <div style={{ padding: '36px 20px 40px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <Zap size={26} color="var(--accent)" style={{ marginBottom: 10 }} />
+      <div style={{ fontSize: 12.5, color: SUB, fontWeight: 700, letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 6 }}>{greeting}</div>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, marginBottom: 34, textAlign: 'center' }}>{firstName}, ready to ride?</div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, width: '100%', maxWidth: 420 }}>
+        {HOME_TILES.map(({ key, label, caption, icon: Icon }) => (
+          <button key={key} onClick={() => onNavigate(key)} style={{
+            aspectRatio: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
+            background: PANEL, border: `1px solid ${LINE}`, borderRadius: 18, cursor: 'pointer', padding: 12,
+          }}>
+            <div style={{ width: 56, height: 56, borderRadius: 16, background: PANEL2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon size={28} color="var(--accent)" />
+            </div>
+            <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 16, fontWeight: 600, color: TEXT }}>{label}</div>
+            <div style={{ fontSize: 11, color: SUB }}>{caption}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------- FTP: run a test, see your history ----------
+function FtpView({ ftp, setFtp, ftpHistory, onClearFtpHistory, onOpenWorkout }) {
+  const tests = [LIBRARY.find(w => w.id === 'ramp-ftp-test'), LIBRARY.find(w => w.id === 'ftp-test-20')].filter(Boolean);
+  const history = (ftpHistory || []).slice().reverse().slice(0, 10);
+
+  return (
+    <div style={{ padding: '16px 16px 80px' }}>
+      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, letterSpacing: 0.3, marginBottom: 2 }}>FTP</div>
+      <div style={{ fontSize: 13, color: SUB, marginBottom: 18 }}>Test your threshold power and keep an eye on it over time.</div>
+
+      <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 11, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Current FTP</div>
+          <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 32, fontWeight: 700, color: TEXT }}>{ftp}W</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="number" value={ftp} onChange={e => setFtp(Math.max(50, Number(e.target.value) || 0))}
+            style={{ width: 72, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '8px 10px', fontSize: 14, textAlign: 'center' }} />
+          <span style={{ fontSize: 12.5, color: SUB }}>W</span>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: SUB, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>Test protocols</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 26 }}>
+        {tests.map(w => {
+          const total = totalDuration(w.intervals);
+          return (
+            <div key={w.id} onClick={() => onOpenWorkout(w)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <div style={{ fontWeight: 600, fontSize: 15, color: TEXT }}>{w.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--accent)' }}>{fmtLong(total)}</div>
+              </div>
+              <div style={{ fontSize: 12.5, color: SUB, marginBottom: 10 }}>{w.description}</div>
+              <ProfileChart intervals={w.intervals} height={36} />
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: SUB, textTransform: 'uppercase', letterSpacing: 0.6 }}>Test history</div>
+        {history.length > 0 && (
+          <button onClick={onClearFtpHistory} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Trash2 size={12} /> Clear
+          </button>
+        )}
+      </div>
+      {history.length === 0 ? (
+        <div style={{ color: SUB, fontSize: 13, textAlign: 'center', padding: '24px 0', border: `1px dashed ${LINE}`, borderRadius: 10 }}>
+          No FTP tests logged yet — run one of the protocols above to get started.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {history.map(entry => (
+            <div key={entry.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: PANEL, borderRadius: 8, padding: '8px 10px' }}>
+              <div>
+                <div style={{ fontSize: 13.5, color: TEXT, fontWeight: 600 }}>{entry.ftp}W</div>
+                <div style={{ fontSize: 11.5, color: SUB }}>{entry.source}</div>
+              </div>
+              <div style={{ fontSize: 11.5, color: SUB }}>{new Date(entry.date).toLocaleDateString()}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1775,8 +1898,7 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
   const [isDone, setIsDone] = useState(false);
   const [testResult, setTestResult] = useState(null); // { ftp, auto } once a ramp test ends
   const [ftpApplied, setFtpApplied] = useState(false);
-  const [confirmRestart, setConfirmRestart] = useState(false);
-  const confirmRestartTimer = useRef(null);
+  const [pendingAction, setPendingAction] = useState(null); // null | 'exit' | 'restart' \u2014 set while a confirm dialog is up
   const beepedRef = useRef(new Set());
   const wakeLockRef = useRef(null);
   const prevBleStatus = useRef(trainer.status);
@@ -1909,8 +2031,6 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
     setFtpApplied(false);
     stepSamplesRef.current = [];
     underPowerStreakRef.current = 0;
-    clearTimeout(confirmRestartTimer.current);
-    setConfirmRestart(false);
   }
   function restart() {
     setCurrentIndex(0); setTimeLeft(intervals[0].duration); setIsPlaying(false); setIsDone(false);
@@ -1921,21 +2041,27 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
     lastStepAvgRef.current = null;
     underPowerStreakRef.current = 0;
   }
-  // Restart is destructive (throws away progress on the current ride), and
-  // sits near the pause button, so it needs a second tap to confirm rather
-  // than firing on the first accidental touch. The confirm state quietly
-  // reverts on its own after a few seconds if the person doesn't follow through.
-  function handleRestartClick() {
-    if (confirmRestart) {
-      clearTimeout(confirmRestartTimer.current);
-      setConfirmRestart(false);
-      restart();
+  // Exit and restart both throw away an in-progress effort, so while the
+  // workout is actively running we interrupt with a confirmation dialog
+  // first. If it's paused (or already finished) there's nothing to lose by
+  // stopping, so the action just happens right away.
+  function requestAction(action) {
+    if (isPlaying) {
+      setIsPlaying(false); // pause while they decide \u2014 don't let the clock run out behind the dialog
+      setPendingAction(action);
     } else {
-      setConfirmRestart(true);
-      confirmRestartTimer.current = setTimeout(() => setConfirmRestart(false), 4000);
+      performAction(action);
     }
   }
-  useEffect(() => () => clearTimeout(confirmRestartTimer.current), []);
+  function performAction(action) {
+    setPendingAction(null);
+    if (action === 'exit') onExit();
+    else if (action === 'restart') restart();
+  }
+  function cancelPendingAction() {
+    setPendingAction(null);
+    setIsPlaying(true); // "keep riding" resumes right where they left off
+  }
 
   const current = intervals[currentIndex];
   const next = intervals[currentIndex + 1];
@@ -1950,7 +2076,7 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
   return (
     <div className="player-screen" style={{ padding: '14px 16px 16px', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexShrink: 0 }}>
-        <button onClick={onExit} style={{ background: 'none', border: 'none', color: SUB, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}><X size={18} /> Exit</button>
+        <button onClick={() => requestAction('exit')} style={{ background: 'none', border: 'none', color: SUB, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}><X size={18} /> Exit</button>
         <div style={{ fontSize: 13, color: SUB }}>{workout.name}</div>
       </div>
 
@@ -2007,7 +2133,7 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
         <div className="player-controls">
           <div className="player-controls-row" style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 20 }}>
             <IconBtn onClick={() => skip(-1)} disabled={currentIndex === 0}><SkipBack size={18} /></IconBtn>
-            <button onClick={isDone ? restart : togglePlay} style={{ width: 68, height: 68, borderRadius: '50%', border: 'none', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <button onClick={isDone ? () => requestAction('restart') : togglePlay} style={{ width: 68, height: 68, borderRadius: '50%', border: 'none', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
               {isDone ? <RotateCcw size={26} color={INK} /> : isPlaying ? <Pause size={26} color={INK} fill={INK} /> : <Play size={26} color={INK} fill={INK} style={{ marginLeft: 3 }} />}
             </button>
             <IconBtn onClick={() => skip(1)} disabled={currentIndex === intervals.length - 1}><SkipForward size={18} /></IconBtn>
@@ -2015,20 +2141,9 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
 
           {!isDone && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>
-              {!confirmRestart ? (
-                <button onClick={handleRestartClick} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '6px 10px' }}>
-                  <RotateCcw size={13} /> Restart
-                </button>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button onClick={handleRestartClick} style={{ background: RED, border: 'none', color: '#fff', fontSize: 12.5, fontWeight: 700, borderRadius: 8, padding: '7px 14px', cursor: 'pointer' }}>
-                    Tap again to restart
-                  </button>
-                  <button onClick={() => setConfirmRestart(false)} style={{ background: 'none', border: `1px solid ${LINE}`, color: SUB, fontSize: 12, borderRadius: 8, padding: '7px 10px', cursor: 'pointer' }}>
-                    Cancel
-                  </button>
-                </div>
-              )}
+              <button onClick={() => requestAction('restart')} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '6px 10px' }}>
+                <RotateCcw size={13} /> Restart
+              </button>
             </div>
           )}
         </div>
@@ -2037,6 +2152,18 @@ function PlayerView({ workout, ftp, settings, trainer, onExit, onSaveFtpResult, 
       <div style={{ flexShrink: 0, marginTop: 14 }}>
         <ProfileChart intervals={intervals} progress={progress} height={48} />
       </div>
+
+      {pendingAction && (
+        <ConfirmModal
+          title={pendingAction === 'exit' ? 'Exit workout?' : 'Restart workout?'}
+          message="Your ride is still running \u2014 are you sure you want to continue?"
+          cancelLabel="Keep riding"
+          confirmLabel={pendingAction === 'exit' ? 'Exit' : 'Restart'}
+          danger
+          onCancel={cancelPendingAction}
+          onConfirm={() => performAction(pendingAction)}
+        />
+      )}
     </div>
   );
 }
@@ -2536,7 +2663,7 @@ function OrientationGate({ preferredOrientation, children }) {
 
 // ---------- app ----------
 export default function App() {
-  const [view, setView] = useState('library');
+  const [view, setView] = useState('home');
   const [ftp, setFtpState] = useState(200);
   const [settings, setSettingsState] = useState(DEFAULT_SETTINGS);
   const [customWorkouts, setCustomWorkouts] = useState([]);
@@ -2720,7 +2847,7 @@ export default function App() {
     // bottom tab bar: keep clear of notches / home-indicator gestures in
     // both orientations, and compact itself on short landscape screens
     + " .tabbar { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); padding-bottom: env(safe-area-inset-bottom); }"
-    + " .tabbar-btn { padding: 8px 0; }"
+    + " .tabbar-btn { padding: 8px 0; } .tabbar-btn span { white-space: nowrap; }"
     + " @media (orientation: landscape) and (max-height: 480px) { .tabbar-btn { padding: 4px 0; } .tabbar-btn svg { width: 15px; height: 15px; } .tabbar-btn span { font-size: 9px; } }"
     // in-workout screen: fill the real viewport height so nothing needs to
     // scroll to be seen, and lay stats/controls out side-by-side once the
@@ -2793,10 +2920,12 @@ export default function App() {
       <OrientationGate preferredOrientation={settings.preferredOrientation}>
         {!subscribed && <TrialBanner daysLeft={daysLeft} onUpgrade={() => setShowPaywallModal(true)} />}
 
+        {view === 'home' && <HomeView account={account} onNavigate={setView} />}
         {view === 'library' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} />}
         {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" />}
         {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" />}
         {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
+        {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
         {view === 'settings' && (
           <SettingsView
             settings={settings} updateSetting={updateSetting} ftp={ftp} setFtp={setFtp} trainer={trainer}
@@ -2822,6 +2951,9 @@ export default function App() {
         )}
 
         <div className="tabbar" style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: NAVBG, borderTop: `1px solid ${LINE}`, display: 'flex', maxWidth: 520, margin: '0 auto' }}>
+          <button onClick={() => setView('home')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'home' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
+            <Home size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Home</span>
+          </button>
           <button onClick={() => setView('library')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'library' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
             <Library size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Library</span>
           </button>
