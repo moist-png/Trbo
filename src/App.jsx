@@ -49,6 +49,10 @@ const DEFAULT_SETTINGS = {
   soundCountdown: true,
   soundCompletion: true,
   soundVolume: 0.7,
+  soundZoneTones: true,
+  soundHalfwayFinal: true,
+  soundRichFanfare: true,
+  soundOffTargetNudge: false,
   targetDisplay: 'both',
   showNextPreview: true,
   compactLabels: false,
@@ -56,6 +60,10 @@ const DEFAULT_SETTINGS = {
   autoPauseOnDisconnect: false,
   ergMode: false,
   preferredOrientation: 'landscape', // 'landscape' | 'portrait'
+  visualZoneWash: true,
+  visualProgressRing: true,
+  visualPowerGauge: true,
+  visualCelebration: true,
 };
 
 // ---------- account / trial / billing ----------
@@ -104,6 +112,19 @@ function zoneFor(interval) {
   else if (r <= 9) z = { color: '#FF9F40', name: 'VO2 Max' };
   else z = { color: '#FF4D4D', name: 'Anaerobic' };
   return { ...z, intensity: r / 10 };
+}
+
+// A distinct musical note per zone so a rider can hear what's coming next
+// without looking at the screen \u2014 low and mellow for recovery, sharp and
+// high for anaerobic efforts.
+const ZONE_TONE_FREQ = { Recovery: 520, Endurance: 660, Tempo: 760, Threshold: 880, 'VO2 Max': 1020, Anaerobic: 1180, Free: 700 };
+// Confetti palette for the finish-line celebration \u2014 reuses the same
+// bright, high-contrast colors as the zone system so it feels on-brand.
+const CONFETTI_COLORS = ['#C9F031', '#FF9F40', '#4FB8A6', '#FF6B4A', '#5AA9E6', '#FF4D4D'];
+function hexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function fmt(sec) {
@@ -1596,7 +1617,12 @@ function useBeeper() {
     osc.start();
     osc.stop(ctx.currentTime + duration);
   }
-  return { beep };
+  // Plays a short sequence of notes, each with its own delay (ms) from now
+  // \u2014 used for the richer finish fanfare and the halfway/final chimes.
+  function chime(notes, gainVal) {
+    notes.forEach(n => setTimeout(() => beep(n.freq, n.duration, gainVal), n.delay));
+  }
+  return { beep, chime };
 }
 
 // ---------- trainer connectivity (Web Bluetooth FTMS) ----------
@@ -1746,6 +1772,60 @@ function ProfileChart({ intervals, height = 84, progress = null }) {
       {progress !== null && (
         <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${progress * 100}%`, background: 'rgba(255,255,255,0.14)', borderRight: `2px solid ${TEXT}`, pointerEvents: 'none' }} />
       )}
+    </div>
+  );
+}
+
+// A ring that traces around the interval timer and fills clockwise as the
+// current interval counts down, so progress reads at a glance without
+// having to parse the numbers.
+function ProgressRing({ progress, color, size = 210 }) {
+  const stroke = 7;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(1, progress));
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+      style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-90deg)', zIndex: -1 }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={LINE} strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+        strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: 'stroke-dashoffset 0.4s linear, stroke 0.6s ease' }} />
+    </svg>
+  );
+}
+
+// A compact semicircular gauge comparing live power against the current
+// interval's target \u2014 green near target, blue under, red over.
+function PowerGauge({ power, targetWatts }) {
+  const w = 148, h = 82, r = 64, stroke = 11;
+  const path = `M ${w / 2 - r} ${h} A ${r} ${r} 0 0 1 ${w / 2 + r} ${h}`;
+  const ratio = targetWatts > 0 ? power / targetWatts : 0;
+  const fillPct = Math.max(0, Math.min(100, (power / (targetWatts * 1.4 || 1)) * 100));
+  const color = targetWatts <= 0 ? 'var(--accent)' : ratio < 0.85 ? '#4A6FA5' : ratio > 1.15 ? '#FF4D4D' : '#8FC93A';
+  return (
+    <div style={{ position: 'relative', width: w, height: h + 4 }}>
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+        <path d={path} fill="none" stroke={LINE} strokeWidth={stroke} strokeLinecap="round" />
+        <path d={path} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+          pathLength="100" strokeDasharray="100" strokeDashoffset={100 - fillPct}
+          style={{ transition: 'stroke-dashoffset 0.35s ease, stroke 0.35s ease' }} />
+      </svg>
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, textAlign: 'center', fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase' }}>Power</div>
+    </div>
+  );
+}
+
+// Confetti burst shown briefly when a workout finishes.
+function Confetti({ pieces }) {
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 5 }}>
+      {pieces.map(p => (
+        <div key={p.id} style={{
+          position: 'absolute', top: -20, left: `${p.left}%`, width: p.size, height: p.size * 0.4,
+          background: p.color, borderRadius: 2, transform: `rotate(${p.rotate}deg)`,
+          animation: `confetti-fall ${p.duration}s ease-in ${p.delay}s 1 forwards`,
+        }} />
+      ))}
     </div>
   );
 }
@@ -2688,7 +2768,11 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const underPowerStreakRef = useRef(0); // consecutive seconds under the fail threshold
   const triggerAutoStopRef = useRef(() => {});
   const loggedRef = useRef(false); // guards against logging the same session twice
-  const { beep } = useBeeper();
+  const halfwayPlayedRef = useRef(false); // guards the halfway chime from repeating
+  const offTargetStreakRef = useRef(0); // consecutive seconds off-target, for the nudge tone
+  const confettiRef = useRef([]); // randomized confetti pieces, generated once per celebration
+  const [celebrate, setCelebrate] = useState(false);
+  const { beep, chime } = useBeeper();
 
   // Elapsed time in seconds up to a given point in the workout \u2014 used both
   // for the on-screen progress bar and for what gets logged to history.
@@ -2744,6 +2828,15 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
           beepedRef.current.add(currentIndex + '_' + next);
           beep(660, 0.08, 0.08 * settings.soundVolume);
         }
+        // Halfway-through-the-ride chime \u2014 fires once, whenever elapsed
+        // time first crosses the midpoint of the whole workout.
+        if (settings.soundHalfwayFinal && !halfwayPlayedRef.current) {
+          const elapsedNow = computeElapsedSeconds(currentIndex, next);
+          if (elapsedNow >= totalDuration(intervals) / 2) {
+            halfwayPlayedRef.current = true;
+            chime([{ freq: 740, duration: 0.14, delay: 0 }, { freq: 988, duration: 0.22, delay: 130 }], 0.16 * settings.soundVolume);
+          }
+        }
         return next;
       });
       // Collect every second's readings for the whole ride \u2014 used at the
@@ -2751,6 +2844,26 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       // for personal records. Independent of the ramp-test step tracking below.
       if (typeof trainerPowerRef.current === 'number') sessionPowerRef.current.push(trainerPowerRef.current);
       if (typeof heartRateRef.current === 'number') sessionHrRef.current.push(heartRateRef.current);
+      // Off-target power nudge \u2014 a soft tick if power drifts well away
+      // from the current interval's target for a sustained few seconds.
+      // Opt-in and off by default since it can feel naggy.
+      if (settings.soundOffTargetNudge && !isRampTest) {
+        const curInterval = intervals[currentIndex];
+        const power = trainerPowerRef.current;
+        if (curInterval.type === 'power' && typeof power === 'number') {
+          const targetWatts = Math.round((ftp * curInterval.target) / 100);
+          const dev = targetWatts > 0 ? Math.abs(power - targetWatts) / targetWatts : 0;
+          if (dev > 0.15) {
+            offTargetStreakRef.current += 1;
+            if (offTargetStreakRef.current >= 6) {
+              beep(320, 0.06, 0.12 * settings.soundVolume);
+              offTargetStreakRef.current = 0;
+            }
+          } else {
+            offTargetStreakRef.current = 0;
+          }
+        }
+      }
       // Ramp test: log the rider's actual watts each second and watch for
       // a sustained drop below the step's target, which means they've
       // stalled and the test should end for them.
@@ -2772,12 +2885,16 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       }
     }, 1000);
     return () => clearInterval(t);
-  }, [isPlaying, isDone, currentIndex, settings.soundCountdown, settings.soundVolume, isRampTest, ftp]);
+  }, [isPlaying, isDone, currentIndex, settings.soundCountdown, settings.soundVolume, settings.soundHalfwayFinal, settings.soundOffTargetNudge, isRampTest, ftp]);
 
   useEffect(() => {
     if (timeLeft >= 0) return;
     if (currentIndex < intervals.length - 1) {
-      if (settings.soundIntervalBeep) beep(880, 0.2, 0.2 * settings.soundVolume);
+      if (settings.soundIntervalBeep) {
+        const upcomingZone = zoneFor(intervals[currentIndex + 1]);
+        const freq = settings.soundZoneTones ? (ZONE_TONE_FREQ[upcomingZone.name] || 880) : 880;
+        beep(freq, 0.2, 0.2 * settings.soundVolume);
+      }
       if (isRampTest) {
         const finishedStep = intervals[currentIndex];
         if (finishedStep.label !== 'Warm up' && finishedStep.label !== 'Cool down') {
@@ -2791,7 +2908,26 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       setCurrentIndex(next);
       setTimeLeft(intervals[next].duration);
     } else {
-      if (settings.soundCompletion) beep(1046, 0.45, 0.25 * settings.soundVolume);
+      if (settings.soundCompletion) {
+        if (settings.soundRichFanfare) {
+          chime([
+            { freq: 784, duration: 0.16, delay: 0 },
+            { freq: 988, duration: 0.16, delay: 140 },
+            { freq: 1175, duration: 0.16, delay: 280 },
+            { freq: 1568, duration: 0.5, delay: 420 },
+          ], 0.2 * settings.soundVolume);
+        } else {
+          beep(1046, 0.45, 0.25 * settings.soundVolume);
+        }
+      }
+      if (settings.visualCelebration) {
+        confettiRef.current = Array.from({ length: 28 }).map((_, i) => ({
+          id: i, left: Math.random() * 100, delay: Math.random() * 0.4, duration: 1.8 + Math.random() * 1.2,
+          color: CONFETTI_COLORS[i % CONFETTI_COLORS.length], rotate: Math.random() * 360, size: 6 + Math.random() * 5,
+        }));
+        setCelebrate(true);
+        setTimeout(() => setCelebrate(false), 2600);
+      }
       setIsPlaying(false);
       setIsDone(true);
       logSession(true, totalDuration(intervals));
@@ -2807,6 +2943,14 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       }
     }
   }, [timeLeft]);
+
+  // Final-interval heads-up chime \u2014 fires whenever the ride enters its
+  // last interval, whether by natural progression or a manual skip.
+  useEffect(() => {
+    if (settings.soundHalfwayFinal && intervals.length > 1 && currentIndex === intervals.length - 1) {
+      chime([{ freq: 988, duration: 0.12, delay: 0 }, { freq: 1244, duration: 0.12, delay: 110 }, { freq: 1568, duration: 0.22, delay: 220 }], 0.16 * settings.soundVolume);
+    }
+  }, [currentIndex]);
 
   // ERG mode: push power target to trainer on interval change
   useEffect(() => {
@@ -2847,6 +2991,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
     setFtpApplied(false);
     stepSamplesRef.current = [];
     underPowerStreakRef.current = 0;
+    offTargetStreakRef.current = 0;
   }
   function restart() {
     setCurrentIndex(0); setTimeLeft(intervals[0].duration); setIsPlaying(false); setIsDone(false);
@@ -2856,6 +3001,9 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
     stepSamplesRef.current = [];
     lastStepAvgRef.current = null;
     underPowerStreakRef.current = 0;
+    offTargetStreakRef.current = 0;
+    halfwayPlayedRef.current = false;
+    setCelebrate(false);
     sessionPowerRef.current = [];
     sessionHrRef.current = [];
   }
@@ -2897,8 +3045,16 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const targetTxt = formatTarget(current, ftp, settings.targetDisplay);
   const currentPowerTxt = trainer.power !== null ? `${trainer.power}W` : '\u2013 W';
 
+  const ringProgress = isDone ? 1 : Math.min(1, (current.duration - Math.max(0, timeLeft)) / current.duration);
+  const targetWattsForGauge = current.type === 'power' ? Math.round((ftp * current.target) / 100) : 0;
+
   return (
-    <div className="player-screen" style={{ padding: '14px 16px 16px', display: 'flex', flexDirection: 'column' }}>
+    <div className="player-screen" style={{ padding: '14px 16px 16px', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+      {settings.visualZoneWash && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: -1, pointerEvents: 'none', transition: 'background 1s ease', background: `radial-gradient(ellipse 80% 55% at 50% 15%, ${hexToRgba(z.color, isDone ? 0.08 : 0.22)} 0%, transparent 70%)` }} />
+      )}
+      {celebrate && <Confetti pieces={confettiRef.current} />}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexShrink: 0 }}>
         <button onClick={() => requestAction('exit')} style={{ background: 'none', border: 'none', color: SUB, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}><X size={18} /> Exit</button>
         <div style={{ fontSize: 13, color: SUB }}>{workout.name}</div>
@@ -2909,12 +3065,17 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
           <div style={{ fontSize: 13, color: z.color, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
             {isDone ? (testResult ? (testResult.auto ? 'Test ended \u2014 that\u2019s your limit' : 'Ramp test complete') : 'Workout complete') : (current.label || z.name)}
           </div>
-          <div className="player-timer" style={{ fontFamily: 'Space Mono, monospace', fontSize: settings.compactLabels ? 44 : 64, fontWeight: 700, color: TEXT, lineHeight: 1 }}>
-            {isDone ? (testResult ? `${testResult.ftp}W` : fmtLong(total)) : fmt(Math.max(0, timeLeft))}
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            {settings.visualProgressRing && (
+              <ProgressRing progress={ringProgress} color={z.color} size={settings.compactLabels ? 150 : 210} />
+            )}
+            <div className="player-timer" style={{ fontFamily: 'Space Mono, monospace', fontSize: settings.compactLabels ? 44 : 64, fontWeight: 700, color: TEXT, lineHeight: 1, padding: '0 8px' }}>
+              {isDone ? (testResult ? `${testResult.ftp}W` : fmtLong(total)) : fmt(Math.max(0, timeLeft))}
+            </div>
           </div>
 
           {!isDone && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
               <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 18px', minWidth: 92 }}>
                 <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Target</div>
                 <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 19, fontWeight: 700, color: TEXT, marginTop: 2 }}>{targetTxt}</div>
@@ -2923,6 +3084,9 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
                 <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Current</div>
                 <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 19, fontWeight: 700, color: trainer.status === 'connected' ? 'var(--accent)' : TEXT, marginTop: 2 }}>{currentPowerTxt}</div>
               </div>
+              {settings.visualPowerGauge && trainer.status === 'connected' && current.type === 'power' && (
+                <PowerGauge power={trainer.power || 0} targetWatts={targetWattsForGauge} />
+              )}
             </div>
           )}
 
@@ -3086,6 +3250,19 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
           onChange={e => updateSetting('soundVolume', Number(e.target.value))}
           style={{ width: '100%', accentColor: settings.accentColor }} />
       </div>
+      <div style={{ fontSize: 12.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14, marginBottom: 2 }}>Ride cues</div>
+      <SettingRow label="Distinct tone per zone" sub="Interval-change beep pitch matches the upcoming effort \u2014 low for recovery, sharp for anaerobic">
+        <Switch checked={settings.soundZoneTones} onChange={v => updateSetting('soundZoneTones', v)} />
+      </SettingRow>
+      <SettingRow label="Halfway & final-interval chimes" sub="A soft chime at the workout's midpoint and again entering the last interval">
+        <Switch checked={settings.soundHalfwayFinal} onChange={v => updateSetting('soundHalfwayFinal', v)} />
+      </SettingRow>
+      <SettingRow label="Richer finish fanfare" sub="A short rising jingle instead of a single beep when you finish">
+        <Switch checked={settings.soundRichFanfare} onChange={v => updateSetting('soundRichFanfare', v)} />
+      </SettingRow>
+      <SettingRow label="Off-target power nudge" sub="A subtle tick if your power drifts well off target for a few seconds">
+        <Switch checked={settings.soundOffTargetNudge} onChange={v => updateSetting('soundOffTargetNudge', v)} />
+      </SettingRow>
 
       <SectionHeader icon={<Sun size={16} color="var(--accent)" />} title="Visuals" />
       <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
@@ -3125,6 +3302,19 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
           <Chip active={settings.preferredOrientation === 'portrait'} onClick={() => updateSetting('preferredOrientation', 'portrait')}>Portrait</Chip>
         </div>
       </div>
+      <div style={{ fontSize: 12.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14, marginBottom: 2 }}>Ride cues</div>
+      <SettingRow label="Zone-colored background wash" sub="A subtle screen tint that shifts with the current effort zone">
+        <Switch checked={settings.visualZoneWash} onChange={v => updateSetting('visualZoneWash', v)} />
+      </SettingRow>
+      <SettingRow label="Radial progress ring on timer" sub="A ring around the countdown that fills as the interval progresses">
+        <Switch checked={settings.visualProgressRing} onChange={v => updateSetting('visualProgressRing', v)} />
+      </SettingRow>
+      <SettingRow label="Live power gauge dial" sub="A dial next to your stats showing power relative to target (needs a connected trainer)">
+        <Switch checked={settings.visualPowerGauge} onChange={v => updateSetting('visualPowerGauge', v)} />
+      </SettingRow>
+      <SettingRow label="Finish-line celebration" sub="A brief confetti animation when you complete a workout">
+        <Switch checked={settings.visualCelebration} onChange={v => updateSetting('visualCelebration', v)} />
+      </SettingRow>
       <SettingRow label="Show next interval preview"><Switch checked={settings.showNextPreview} onChange={v => updateSetting('showNextPreview', v)} /></SettingRow>
       <SettingRow label="Compact timer" sub="Smaller countdown digits during a workout"><Switch checked={settings.compactLabels} onChange={v => updateSetting('compactLabels', v)} /></SettingRow>
       <SettingRow label="Keep screen awake" sub="Prevent the screen from sleeping while riding"><Switch checked={settings.keepAwake} onChange={v => updateSetting('keepAwake', v)} /></SettingRow>
@@ -3849,7 +4039,9 @@ export default function App() {
     + " .player-screen { height: 100vh; height: 100dvh; box-sizing: border-box; }"
     + " .player-main { flex: 1; min-height: 0; overflow: auto; }"
     + " @media (orientation: landscape) { .player-main { flex-direction: row !important; align-items: center; justify-content: center; gap: 32px; } .player-stats { flex: 1 1 auto; max-width: 420px; } .player-controls { flex: 0 0 auto; } }"
-    + " @media (orientation: landscape) and (max-height: 420px) { .player-timer { font-size: 44px !important; } .player-controls-row { margin-top: 10px !important; } }";
+    + " @media (orientation: landscape) and (max-height: 420px) { .player-timer { font-size: 44px !important; } .player-controls-row { margin-top: 10px !important; } }"
+    // finish-line celebration confetti
+    + " @keyframes confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(420px) rotate(600deg); opacity: 0; } }";
   const wrapStyle = { '--accent': settings.accentColor, ...themeVars, background: BG, minHeight: '100%', fontFamily: 'Inter, sans-serif' };
 
   if (authLoading) {
