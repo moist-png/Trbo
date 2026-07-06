@@ -54,6 +54,8 @@ const THEMES = {
     hero1: '#C0F5ED', hero1ink: '#1F6F63', hero1chip: 'rgba(255,255,255,0.72)',
     hero2: '#E6CBA8', hero2ink: '#8A5A22', hero2chip: 'rgba(255,255,255,0.72)',
     flame: '#D79A4E',
+    // Default theme always shows teal trim, regardless of the accent colour picked in Settings
+    accent: '#2FC5AE',
   },
 };
 const ACCENT_PRESETS = [
@@ -2191,8 +2193,8 @@ function HomeView({ account, ftpHistory, workoutHistory, onNavigate }) {
   const rideCount = LIBRARY.filter(w => w.category === 'Rides').length;
 
   const heroes = [
-    { key: 'basics', label: 'Workouts', caption: `${workoutCount} structured sessions · intervals, sweet spot, VO2`, icon: Dumbbell, bg: 'var(--hero1)', ink: 'var(--hero1-ink)', chip: 'var(--hero1-chip)' },
-    { key: 'rides', label: 'Rides', caption: `${rideCount} long routes · mixed-terrain, real-world feel`, icon: Bike, bg: 'var(--hero2)', ink: 'var(--hero2-ink)', chip: 'var(--hero2-chip)' },
+    { key: 'basics', label: 'Workouts', caption: `${workoutCount} structured sessions · intervals, sweet spot, VO2`, icon: Dumbbell, photo: '/images/home-workouts.jpg', photoPos: 'center 45%', ink: 'var(--hero1-ink)', chip: 'var(--hero1-chip)' },
+    { key: 'rides', label: 'Rides', caption: `${rideCount} long routes · mixed-terrain, real-world feel`, icon: Bike, photo: '/images/home-rides.jpg', photoPos: 'center 62%', ink: 'var(--hero2-ink)', chip: 'var(--hero2-chip)' },
   ];
   const slim = [
     { key: 'builder', label: 'Builder', icon: Wrench },
@@ -2253,7 +2255,7 @@ function HomeView({ account, ftpHistory, workoutHistory, onNavigate }) {
         {/* hero cards */}
         {heroes.map(h => (
           <button key={h.key} onClick={() => onNavigate(h.key)} style={{ width: '100%', padding: 0, border: `1px solid ${LINE}`, borderRadius: 20, overflow: 'hidden', cursor: 'pointer', background: PANEL, marginBottom: 14, display: 'block', textAlign: 'left' }}>
-            <div style={{ position: 'relative', height: 132, background: h.bg, display: 'flex', alignItems: 'flex-end' }}>
+            <div style={{ position: 'relative', height: 132, backgroundImage: `url(${h.photo})`, backgroundSize: 'cover', backgroundPosition: h.photoPos, display: 'flex', alignItems: 'flex-end' }}>
               <div style={{ width: 40, height: 40, borderRadius: 12, background: h.chip, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 0 14px 14px' }}>
                 <h.icon size={21} color={h.ink} />
               </div>
@@ -4105,7 +4107,7 @@ export default function App() {
     + " @media (orientation: landscape) and (max-height: 420px) { .player-timer { font-size: 38px !important; } .ring-box { width: 120px !important; height: 120px !important; } .ring-box svg { width: 120px !important; height: 120px !important; } .player-controls-row { margin-top: 6px !important; } }"
     // finish-line celebration confetti
     + " @keyframes confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(420px) rotate(600deg); opacity: 0; } }";
-  const wrapStyle = { '--accent': settings.accentColor, ...themeVars, background: BG, minHeight: '100%', fontFamily: 'Inter, sans-serif' };
+  const wrapStyle = { '--accent': theme.accent || settings.accentColor, ...themeVars, background: BG, minHeight: '100%', fontFamily: 'Inter, sans-serif' };
 
   if (authLoading) {
     return <div style={wrapStyle}><style>{globalStyle}</style></div>;

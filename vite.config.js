@@ -29,7 +29,7 @@ export default defineConfig({
         // workout \u2014 without a wifi or data connection. Supabase calls (auth,
         // saving history) still need a connection when they happen, but
         // simply opening the app and riding a workout does not.
-        globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,png,jpg,svg,woff2}'],
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
