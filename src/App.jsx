@@ -29,11 +29,31 @@ const THEMES = {
     bg: '#14171A', panel: '#1D2126', panel2: '#242930', line: '#31373F',
     text: '#E9ECEF', sub: '#8B929B', red: '#FF4D4D', muted: '#4a4f56',
     navbg: 'rgba(20,23,26,0.96)',
+    // NEW: category hero surfaces + streak flame
+    hero1: 'repeating-linear-gradient(135deg,#20252b,#20252b 10px,#1a1e23 10px,#1a1e23 20px)',
+    hero1ink: 'var(--accent)', hero1chip: 'rgba(20,23,26,0.72)',
+    hero2: 'repeating-linear-gradient(135deg,#20252b,#20252b 10px,#1a1e23 10px,#1a1e23 20px)',
+    hero2ink: 'var(--accent)', hero2chip: 'rgba(20,23,26,0.72)',
+    flame: 'var(--accent)',
   },
   light: {
     bg: '#F3F4F6', panel: '#FFFFFF', panel2: '#ECEEF1', line: '#DDE1E6',
     text: '#14171A', sub: '#6B7280', red: '#D9333F', muted: '#C7CBD1',
     navbg: 'rgba(255,255,255,0.96)',
+    hero1: 'repeating-linear-gradient(135deg,#EEF1F3,#EEF1F3 10px,#E7EBEE 10px,#E7EBEE 20px)',
+    hero1ink: 'var(--accent)', hero1chip: '#F0FBDD',
+    hero2: 'repeating-linear-gradient(135deg,#EEF1F3,#EEF1F3 10px,#E7EBEE 10px,#E7EBEE 20px)',
+    hero2ink: 'var(--accent)', hero2chip: '#F0FBDD',
+    flame: 'var(--accent)',
+  },
+  // NEW THEME
+  palette: {
+    bg: '#F3EDE3', panel: '#FFFFFF', panel2: '#E9E0D0', line: '#EAE1D2',
+    text: '#2A2A2A', sub: '#9A9184', red: '#C0392B', muted: '#CFC5B4',
+    navbg: 'rgba(250,246,239,0.96)',
+    hero1: '#C0F5ED', hero1ink: '#1F6F63', hero1chip: 'rgba(255,255,255,0.72)',
+    hero2: '#E6CBA8', hero2ink: '#8A5A22', hero2chip: 'rgba(255,255,255,0.72)',
+    flame: '#D79A4E',
   },
 };
 const ACCENT_PRESETS = [
@@ -41,6 +61,7 @@ const ACCENT_PRESETS = [
   { name: 'Ember', value: '#FF6B4A' },
   { name: 'Steel', value: '#5AA9E6' },
   { name: 'Chalk', value: '#F2F2F2' },
+  { name: 'Mint', value: '#2FC5AE' },
 ];
 const DEFAULT_SETTINGS = {
   theme: 'dark', // 'dark' | 'light'
@@ -2151,6 +2172,7 @@ function HomeView({ account, ftpHistory, workoutHistory, onNavigate }) {
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Late one' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const firstName = (account && account.name ? account.name.split(' ')[0] : '') || 'Rider';
+  const initial = firstName.charAt(0).toUpperCase();
 
   const weekAgo = Date.now() - 7 * 86400000;
   const thisWeek = (workoutHistory || []).filter(w => new Date(w.date).getTime() >= weekAgo);
@@ -2161,79 +2183,102 @@ function HomeView({ account, ftpHistory, workoutHistory, onNavigate }) {
   const prevFtpVal = ftpValues.length > 1 ? ftpValues[ftpValues.length - 2] : null;
   const ftpDelta = currentFtpVal != null && prevFtpVal != null ? currentFtpVal - prevFtpVal : null;
 
-  const suggestion = buildNextUpSuggestion(ftpHistory, workoutHistory);
-  const recent = (workoutHistory || []).slice().reverse().slice(0, 5);
+  const pr = computePersonalRecords(workoutHistory);
+  const streak = pr ? pr.currentStreak : 0;
+  const bestStreak = pr ? pr.longestStreak : 0;
+
+  const workoutCount = LIBRARY.filter(w => w.category === 'Basics').length;
+  const rideCount = LIBRARY.filter(w => w.category === 'Rides').length;
+
+  const heroes = [
+    { key: 'basics', label: 'Workouts', caption: `${workoutCount} structured sessions · intervals, sweet spot, VO2`, icon: Dumbbell, bg: 'var(--hero1)', ink: 'var(--hero1-ink)', chip: 'var(--hero1-chip)' },
+    { key: 'rides', label: 'Rides', caption: `${rideCount} long routes · mixed-terrain, real-world feel`, icon: Bike, bg: 'var(--hero2)', ink: 'var(--hero2-ink)', chip: 'var(--hero2-chip)' },
+  ];
+  const slim = [
+    { key: 'builder', label: 'Builder', icon: Wrench },
+    { key: 'ftp', label: 'FTP test', icon: Gauge },
+  ];
+
+  const cardBase = { background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 12, minWidth: 0 };
+  const kick = { fontSize: 9.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 6 };
+  const monoVal = { fontFamily: 'Space Mono, monospace', fontSize: 17, color: TEXT };
 
   return (
-    <div style={{ padding: '32px 20px 40px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <Zap size={26} color="var(--accent)" style={{ marginBottom: 10 }} />
-      <div style={{ fontSize: 12.5, color: SUB, fontWeight: 700, letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 6 }}>{greeting}</div>
-      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, marginBottom: 24, textAlign: 'center' }}>{firstName}, ready to ride?</div>
+    <div style={{ padding: '22px 20px 40px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ width: '100%', maxWidth: 440 }}>
 
-      <div style={{ display: 'flex', gap: 12, width: '100%', maxWidth: 420, marginBottom: 14 }}>
-        <div style={{ flex: 1, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
-          <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 6 }}>This week</div>
-          <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 20, fontWeight: 700, color: TEXT }}>{weekSeconds > 0 ? fmtLong(weekSeconds) : '0 min'}</div>
-          <div style={{ fontSize: 11.5, color: SUB, marginTop: 2 }}>{thisWeek.length} session{thisWeek.length === 1 ? '' : 's'}</div>
-        </div>
-        <div style={{ flex: 1, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
-          <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 6 }}>FTP</div>
-          {currentFtpVal != null ? (
-            <>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 20, fontWeight: 700, color: TEXT }}>{currentFtpVal}W</div>
-                {ftpDelta != null && ftpDelta !== 0 && (
-                  <div style={{ fontSize: 11, color: ftpDelta > 0 ? '#8FC93A' : SUB }}>{ftpDelta > 0 ? '+' : ''}{ftpDelta}</div>
-                )}
-              </div>
-              {ftpValues.length >= 2 ? <Sparkline values={ftpValues} /> : <div style={{ fontSize: 11.5, color: SUB, marginTop: 4 }}>Test again to see a trend</div>}
-            </>
-          ) : (
-            <div style={{ fontSize: 11.5, color: SUB, marginTop: 2 }}>No tests yet</div>
+        {/* header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+          <div style={{ width: 44, height: 44, borderRadius: '50%', background: PANEL2, border: `1px solid ${LINE}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Oswald, sans-serif', fontWeight: 600, fontSize: 18, color: 'var(--accent)' }}>{initial}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{greeting}</div>
+            <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, lineHeight: 1.1 }}>{firstName}</div>
+          </div>
+          {streak > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 999, padding: '6px 12px' }}>
+              <Flame size={15} color="var(--flame)" fill="var(--flame)" />
+              <span style={{ fontFamily: 'Space Mono, monospace', fontSize: 13, color: TEXT }}>{streak}</span>
+            </div>
           )}
         </div>
-      </div>
 
-      {suggestion.text && (
-        <button onClick={() => suggestion.action && onNavigate(suggestion.action)} style={{
-          width: '100%', maxWidth: 420, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12,
-          background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, marginBottom: 24,
-          cursor: suggestion.action ? 'pointer' : 'default',
-        }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: PANEL2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Zap size={16} color="var(--accent)" />
+        {/* 3-up stat strip */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 22 }}>
+          <div style={cardBase}>
+            <div style={kick}>This week</div>
+            <div style={monoVal}>{weekSeconds > 0 ? fmtLong(weekSeconds) : '0 min'}</div>
+            <div style={{ fontSize: 10.5, color: SUB, marginTop: 2 }}>{thisWeek.length} session{thisWeek.length === 1 ? '' : 's'}</div>
           </div>
-          <div style={{ flex: 1, fontSize: 13, color: TEXT, lineHeight: 1.4 }}>{suggestion.text}</div>
-          {suggestion.action && <ChevronRight size={18} color={SUB} style={{ flexShrink: 0 }} />}
-        </button>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, width: '100%', maxWidth: 420, marginBottom: recent.length ? 30 : 0 }}>
-        {HOME_TILES.map(({ key, label, caption, icon: Icon }) => (
-          <button key={key} onClick={() => onNavigate(key)} style={{
-            aspectRatio: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
-            background: PANEL, border: `1px solid ${LINE}`, borderRadius: 18, cursor: 'pointer', padding: 12,
-          }}>
-            <div style={{ width: 56, height: 56, borderRadius: 16, background: PANEL2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Icon size={28} color="var(--accent)" />
-            </div>
-            <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 16, fontWeight: 600, color: TEXT }}>{label}</div>
-            <div style={{ fontSize: 11, color: SUB }}>{caption}</div>
-          </button>
-        ))}
-      </div>
-
-      {recent.length > 0 && (
-        <div style={{ width: '100%', maxWidth: 420 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <div style={{ fontSize: 12, color: SUB, textTransform: 'uppercase', letterSpacing: 0.6 }}>Recent activity</div>
-            <button onClick={() => onNavigate('history')} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer' }}>See all</button>
+          <div style={cardBase}>
+            <div style={kick}>FTP</div>
+            {currentFtpVal != null ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                  <div style={monoVal}>{currentFtpVal}</div>
+                  {ftpDelta != null && ftpDelta !== 0 && <div style={{ fontSize: 10.5, color: ftpDelta > 0 ? 'var(--accent)' : SUB }}>{ftpDelta > 0 ? '+' : ''}{ftpDelta}</div>}
+                </div>
+                {ftpValues.length >= 2 ? <Sparkline values={ftpValues} height={16} /> : <div style={{ fontSize: 10.5, color: SUB, marginTop: 2 }}>—</div>}
+              </>
+            ) : <div style={{ fontSize: 10.5, color: SUB, marginTop: 2 }}>No tests</div>}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {recent.map(entry => <HistoryRow key={entry.id} entry={entry} />)}
+          <div style={cardBase}>
+            <div style={kick}>Streak</div>
+            <div style={monoVal}>{streak}d</div>
+            <div style={{ fontSize: 10.5, color: SUB, marginTop: 2 }}>Best: {bestStreak}</div>
           </div>
         </div>
-      )}
+
+        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 20, fontWeight: 600, color: TEXT, marginBottom: 14 }}>What are we riding?</div>
+
+        {/* hero cards */}
+        {heroes.map(h => (
+          <button key={h.key} onClick={() => onNavigate(h.key)} style={{ width: '100%', padding: 0, border: `1px solid ${LINE}`, borderRadius: 20, overflow: 'hidden', cursor: 'pointer', background: PANEL, marginBottom: 14, display: 'block', textAlign: 'left' }}>
+            <div style={{ position: 'relative', height: 132, background: h.bg, display: 'flex', alignItems: 'flex-end' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: h.chip, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 0 14px 14px' }}>
+                <h.icon size={21} color={h.ink} />
+              </div>
+            </div>
+            <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 18, fontWeight: 600, color: TEXT }}>{h.label}</div>
+                <div style={{ fontSize: 11.5, color: SUB, marginTop: 2 }}>{h.caption}</div>
+              </div>
+              <ChevronRight size={18} color={SUB} style={{ flexShrink: 0 }} />
+            </div>
+          </button>
+        ))}
+
+        {/* slim row */}
+        <div style={{ display: 'flex', gap: 12 }}>
+          {slim.map(s => (
+            <button key={s.key} onClick={() => onNavigate(s.key)} style={{ flex: 1, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 14, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', textAlign: 'left' }}>
+              <s.icon size={18} color="var(--accent)" />
+              <span style={{ fontSize: 13, color: TEXT, fontWeight: 500 }}>{s.label}</span>
+            </button>
+          ))}
+        </div>
+
+      </div>
     </div>
   );
 }
@@ -3280,8 +3325,9 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
       <SectionHeader icon={<Sun size={16} color="var(--accent)" />} title="Visuals" />
       <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
         <div style={{ fontSize: 14, color: TEXT, marginBottom: 8 }}>Appearance</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Chip active={settings.theme !== 'light'} onClick={() => updateSetting('theme', 'dark')}><Moon size={12} style={{ marginRight: 5, verticalAlign: -2 }} />Dark</Chip>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Chip active={settings.theme === 'palette'} onClick={() => updateSetting('theme', 'palette')}>New palette</Chip>
+          <Chip active={settings.theme === 'dark'} onClick={() => updateSetting('theme', 'dark')}><Moon size={12} style={{ marginRight: 5, verticalAlign: -2 }} />Dark</Chip>
           <Chip active={settings.theme === 'light'} onClick={() => updateSetting('theme', 'light')}><Sun size={12} style={{ marginRight: 5, verticalAlign: -2 }} />Light</Chip>
         </div>
       </div>
@@ -4034,6 +4080,10 @@ export default function App() {
   const themeVars = {
     '--bg': theme.bg, '--panel': theme.panel, '--panel2': theme.panel2, '--line': theme.line,
     '--text': theme.text, '--sub': theme.sub, '--red': theme.red, '--muted': theme.muted, '--navbg': theme.navbg,
+    // NEW
+    '--hero1': theme.hero1, '--hero1-ink': theme.hero1ink, '--hero1-chip': theme.hero1chip,
+    '--hero2': theme.hero2, '--hero2-ink': theme.hero2ink, '--hero2-chip': theme.hero2chip,
+    '--flame': theme.flame,
   };
   const themeCss = Object.entries(themeVars).map(([k, v]) => `${k}:${v};`).join('');
   const globalStyle = "@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Space+Mono:wght@700&family=Inter:wght@400;500;600&display=swap');"
