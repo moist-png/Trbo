@@ -1,5 +1,9 @@
 -- Turbo Trainer: database setup
 -- Paste this whole thing into Supabase SQL Editor and click "Run".
+-- Safe to re-run in full any time \u2014 every statement below either checks
+-- "if exists"/"if not exists" first or uses "create or replace", so running
+-- it again after a previous run (or after this file gets new sections
+-- added) won't error out on things that already exist.
 
 -- 1. One row per user: their app-level info (FTP, trial, subscription, settings)
 create table if not exists public.profiles (
@@ -48,21 +52,34 @@ alter table public.custom_workouts enable row level security;
 alter table public.ftp_history enable row level security;
 alter table public.workout_history enable row level security;
 
+drop policy if exists "Users can view own profile" on public.profiles;
 create policy "Users can view own profile" on public.profiles for select using (auth.uid() = id);
+drop policy if exists "Users can update own profile" on public.profiles;
 create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+drop policy if exists "Users can insert own profile" on public.profiles;
 create policy "Users can insert own profile" on public.profiles for insert with check (auth.uid() = id);
 
+drop policy if exists "Users can view own workouts" on public.custom_workouts;
 create policy "Users can view own workouts" on public.custom_workouts for select using (auth.uid() = user_id);
+drop policy if exists "Users can insert own workouts" on public.custom_workouts;
 create policy "Users can insert own workouts" on public.custom_workouts for insert with check (auth.uid() = user_id);
+drop policy if exists "Users can update own workouts" on public.custom_workouts;
 create policy "Users can update own workouts" on public.custom_workouts for update using (auth.uid() = user_id);
+drop policy if exists "Users can delete own workouts" on public.custom_workouts;
 create policy "Users can delete own workouts" on public.custom_workouts for delete using (auth.uid() = user_id);
 
+drop policy if exists "Users can view own ftp history" on public.ftp_history;
 create policy "Users can view own ftp history" on public.ftp_history for select using (auth.uid() = user_id);
+drop policy if exists "Users can insert own ftp history" on public.ftp_history;
 create policy "Users can insert own ftp history" on public.ftp_history for insert with check (auth.uid() = user_id);
+drop policy if exists "Users can delete own ftp history" on public.ftp_history;
 create policy "Users can delete own ftp history" on public.ftp_history for delete using (auth.uid() = user_id);
 
+drop policy if exists "Users can view own workout history" on public.workout_history;
 create policy "Users can view own workout history" on public.workout_history for select using (auth.uid() = user_id);
+drop policy if exists "Users can insert own workout history" on public.workout_history;
 create policy "Users can insert own workout history" on public.workout_history for insert with check (auth.uid() = user_id);
+drop policy if exists "Users can delete own workout history" on public.workout_history;
 create policy "Users can delete own workout history" on public.workout_history for delete using (auth.uid() = user_id);
 
 -- 5. The moment someone signs up, automatically create their profile row
@@ -76,6 +93,7 @@ begin
 end;
 $$ language plpgsql security definer;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
