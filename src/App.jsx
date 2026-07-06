@@ -2283,7 +2283,7 @@ function HomeView({ account, ftpHistory, workoutHistory, onNavigate }) {
 
   const heroes = [
     { key: 'basics', label: 'Workouts', caption: `${workoutCount} structured sessions · intervals, sweet spot, VO2`, icon: Dumbbell, photo: '/images/home-workouts.jpg', photoPos: 'center 45%', ink: 'var(--hero1-ink)', chip: 'var(--hero1-chip)' },
-    { key: 'rides', label: 'Rides', caption: `${rideCount} long routes · mixed-terrain, real-world feel`, icon: Bike, photo: '/images/home-rides.jpg', photoPos: 'center 62%', ink: 'var(--hero2-ink)', chip: 'var(--hero2-chip)' },
+    { key: 'rides', label: 'Rides', caption: `${rideCount} long routes · mixed-terrain, real-world feel`, icon: Bike, photo: '/images/home-rides.jpg', photoPos: 'center 50%', ink: 'var(--hero2-ink)', chip: 'var(--hero2-chip)' },
   ];
   const slim = [
     { key: 'builder', label: 'Builder', icon: Wrench },
