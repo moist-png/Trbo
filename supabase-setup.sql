@@ -131,15 +131,16 @@ alter table public.workout_history add column if not exists max_hr integer;
 --    other account gets nothing back, and the dashboard simply won't
 --    appear in their app.
 --
---    \u26a0\ufe0f BEFORE RUNNING THIS: replace 'YOUR-LOGIN-EMAIL@example.com' below
---    with the email address you personally log into Turbo Trainer with.
+--    Already set below to freddiesmuscles@gmail.com \u2014 if you ever log into
+--    Turbo with a different email, update the address in the line below
+--    to match, then re-run this file.
 create or replace function public.admin_dashboard_stats()
 returns json as $$
 declare
   is_owner boolean;
   result json;
 begin
-  select (auth.jwt() ->> 'email') = 'YOUR-LOGIN-EMAIL@example.com' into is_owner;
+  select (auth.jwt() ->> 'email') = 'freddiesmuscles@gmail.com' into is_owner;
   if not is_owner then
     return null;
   end if;
