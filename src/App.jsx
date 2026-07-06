@@ -58,13 +58,6 @@ const THEMES = {
     accent: '#2FC5AE',
   },
 };
-const ACCENT_PRESETS = [
-  { name: 'Hi-vis', value: '#C9F031' },
-  { name: 'Ember', value: '#FF6B4A' },
-  { name: 'Steel', value: '#5AA9E6' },
-  { name: 'Chalk', value: '#F2F2F2' },
-  { name: 'Mint', value: '#2FC5AE' },
-];
 const DEFAULT_SETTINGS = {
   theme: 'dark', // 'dark' | 'light'
   accentColor: '#C9F031',
@@ -1982,6 +1975,23 @@ function SectionHeader({ icon, title }) {
     </div>
   );
 }
+// A section header that also acts as a toggle, hiding its contents behind a
+// tap so a long options screen can start out short and uncluttered.
+function CollapsibleSection({ icon, title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginTop: 26 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', padding: 0, marginBottom: open ? 4 : 0, cursor: 'pointer', textAlign: 'left' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {icon}
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 16, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{title}</div>
+        </div>
+        {open ? <ChevronUp size={18} color={SUB} /> : <ChevronDown size={18} color={SUB} />}
+      </button>
+      {open && children}
+    </div>
+  );
+}
 
 // A quick yes/no dialog for interrupting a destructive action \u2014 distinct
 // from the bigger bottom sheets (WorkoutDetail, PaywallView) which are for
@@ -3377,7 +3387,7 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
         </>
       ) : null}
 
-      <SectionHeader icon={<Volume2 size={16} color="var(--accent)" />} title="Sounds" />
+      <CollapsibleSection icon={<Volume2 size={16} color="var(--accent)" />} title="Sounds">
       <SettingRow label="Interval transition beep"><Switch checked={settings.soundIntervalBeep} onChange={v => updateSetting('soundIntervalBeep', v)} /></SettingRow>
       <SettingRow label="3-2-1 countdown beep"><Switch checked={settings.soundCountdown} onChange={v => updateSetting('soundCountdown', v)} /></SettingRow>
       <SettingRow label="Completion sound"><Switch checked={settings.soundCompletion} onChange={v => updateSetting('soundCompletion', v)} /></SettingRow>
@@ -3402,26 +3412,15 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
       <SettingRow label="Off-target power nudge" sub="A subtle tick if your power drifts well off target for a few seconds">
         <Switch checked={settings.soundOffTargetNudge} onChange={v => updateSetting('soundOffTargetNudge', v)} />
       </SettingRow>
+      </CollapsibleSection>
 
-      <SectionHeader icon={<Sun size={16} color="var(--accent)" />} title="Visuals" />
+      <CollapsibleSection icon={<Sun size={16} color="var(--accent)" />} title="Visuals">
       <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
         <div style={{ fontSize: 14, color: TEXT, marginBottom: 8 }}>Appearance</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Chip active={settings.theme === 'palette'} onClick={() => updateSetting('theme', 'palette')}>Default</Chip>
           <Chip active={settings.theme === 'dark'} onClick={() => updateSetting('theme', 'dark')}><Moon size={12} style={{ marginRight: 5, verticalAlign: -2 }} />Dark</Chip>
           <Chip active={settings.theme === 'light'} onClick={() => updateSetting('theme', 'light')}><Sun size={12} style={{ marginRight: 5, verticalAlign: -2 }} />Light</Chip>
-        </div>
-      </div>
-      <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
-        <div style={{ fontSize: 14, color: TEXT, marginBottom: 8 }}>Accent colour</div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {ACCENT_PRESETS.map(p => (
-            <button key={p.value} onClick={() => updateSetting('accentColor', p.value)}
-              style={{ width: 36, height: 36, borderRadius: '50%', background: p.value, border: settings.accentColor === p.value ? `2px solid ${TEXT}` : '2px solid transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-              title={p.name}>
-              {settings.accentColor === p.value && <Check size={16} color={INK} />}
-            </button>
-          ))}
         </div>
       </div>
       <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
@@ -3458,6 +3457,7 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
       <SettingRow label="Show next interval preview"><Switch checked={settings.showNextPreview} onChange={v => updateSetting('showNextPreview', v)} /></SettingRow>
       <SettingRow label="Compact timer" sub="Smaller countdown digits during a workout"><Switch checked={settings.compactLabels} onChange={v => updateSetting('compactLabels', v)} /></SettingRow>
       <SettingRow label="Keep screen awake" sub="Prevent the screen from sleeping while riding"><Switch checked={settings.keepAwake} onChange={v => updateSetting('keepAwake', v)} /></SettingRow>
+      </CollapsibleSection>
 
       {account && (
         <>
