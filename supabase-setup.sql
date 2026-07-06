@@ -155,3 +155,10 @@ alter table public.profiles add column if not exists strava_token_expires_at big
 -- functions (api/strava-connect.js, api/strava-upload.js), which use the
 -- service role key, can write the actual token values.
 revoke update (strava_access_token, strava_refresh_token, strava_token_expires_at) on public.profiles from authenticated;
+
+-- 10. Training load: an estimated Training Stress Score and calorie count
+--     computed once when each ride finishes (using the FTP active at the
+--     time), stored alongside the rest of that ride's history so the
+--     History screen and load trend don't need to recompute them later.
+alter table public.workout_history add column if not exists tss numeric;
+alter table public.workout_history add column if not exists calories integer;

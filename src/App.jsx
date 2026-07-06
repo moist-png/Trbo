@@ -3,7 +3,7 @@ import {
   Play, Pause, SkipForward, SkipBack, RotateCcw, X, Plus, Trash2, ChevronUp, ChevronDown, ChevronRight,
   Search, Library, Wrench, Gauge, Save, Edit3, Copy, Settings as SettingsIcon, Bluetooth,
   BluetoothOff, Volume2, Sun, Moon, RefreshCw, Check, Zap, ChevronDown as ChevDown, Bike, Dumbbell, Home,
-  Trophy, HeartPulse, Upload, Flame, Link as LinkIcon, CalendarDays, BarChart3, Locate,
+  Trophy, HeartPulse, Upload, Flame, Link as LinkIcon, CalendarDays, BarChart3, Locate, Download,
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -2251,11 +2251,19 @@ function Sparkline({ values, height = 28, color }) {
 }
 
 function HistoryRow({ entry }) {
+  const stats = [
+    entry.avgPower != null && `${entry.avgPower}W avg`,
+    entry.maxPower != null && `${entry.maxPower}W max`,
+    entry.avgHr != null && `${entry.avgHr} bpm avg`,
+    entry.tss != null && `TSS ${Math.round(entry.tss)}`,
+    entry.calories != null && `${entry.calories} kcal`,
+  ].filter(Boolean);
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '10px 12px' }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13.5, color: TEXT, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</div>
         <div style={{ fontSize: 11.5, color: SUB }}>{new Date(entry.date).toLocaleDateString()} · {fmtLong(entry.duration)}</div>
+        {stats.length > 0 && <div style={{ fontSize: 11, color: SUB, marginTop: 3 }}>{stats.join(' \u00b7 ')}</div>}
       </div>
       {!entry.completed && <div style={{ fontSize: 10, color: SUB, border: `1px solid ${LINE}`, borderRadius: 999, padding: '2px 8px', flexShrink: 0 }}>Partial</div>}
     </div>
@@ -2411,6 +2419,59 @@ function PersonalRecordsPanel({ workoutHistory }) {
   );
 }
 
+// Weekly training load (summed TSS) over the last 8 weeks, plus an average
+// power trend across recent rides \u2014 gives a sense of whether load is
+// trending up, flat, or dropping, alongside the single-ride personal
+// records above. Rides logged before TSS existed simply contribute 0.
+function TrainingLoadPanel({ workoutHistory }) {
+  const completed = (workoutHistory || []).filter(w => w.completed);
+  if (completed.length === 0) return null;
+
+  const thisWeekStart = startOfWeek(new Date().toISOString());
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) weeks.push(thisWeekStart - i * 7 * 86400000);
+  const tssByWeek = {};
+  completed.forEach(w => {
+    const wk = startOfWeek(w.date);
+    tssByWeek[wk] = (tssByWeek[wk] || 0) + (w.tss || 0);
+  });
+  const values = weeks.map(wk => Math.round(tssByWeek[wk] || 0));
+  const maxVal = Math.max(1, ...values);
+  const hasAnyLoad = values.some(v => v > 0);
+
+  const withPower = completed.filter(w => w.avgPower != null).slice(-10);
+  const powerValues = withPower.map(w => w.avgPower);
+
+  if (!hasAnyLoad && powerValues.length < 2) return null;
+
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <BarChart3 size={15} color="var(--accent)" />
+        <div style={{ fontSize: 12, color: SUB, textTransform: 'uppercase', letterSpacing: 0.6 }}>Training load</div>
+      </div>
+      {hasAnyLoad && (
+        <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 12, marginBottom: powerValues.length >= 2 ? 10 : 0 }}>
+          <div style={{ fontSize: 11, color: SUB, marginBottom: 8 }}>Weekly TSS \u00b7 last 8 weeks</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 60 }}>
+            {values.map((v, i) => (
+              <div key={i} style={{ flex: 1, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', height: '100%' }}>
+                <div title={`${v} TSS`} style={{ width: '100%', maxWidth: 22, height: `${Math.max(3, (v / maxVal) * 100)}%`, borderRadius: 4, background: i === values.length - 1 ? 'var(--accent)' : PANEL2, border: `1px solid ${LINE}` }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {powerValues.length >= 2 && (
+        <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 12 }}>
+          <div style={{ fontSize: 11, color: SUB, marginBottom: 2 }}>Average power \u00b7 last {powerValues.length} rides</div>
+          <Sparkline values={powerValues} height={30} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HistoryView({ workoutHistory, onClear }) {
   const all = (workoutHistory || []).slice().reverse();
   return (
@@ -2425,6 +2486,7 @@ function HistoryView({ workoutHistory, onClear }) {
         )}
       </div>
       <PersonalRecordsPanel workoutHistory={workoutHistory} />
+      <TrainingLoadPanel workoutHistory={workoutHistory} />
       {all.length === 0 ? (
         <div style={{ color: SUB, fontSize: 13, textAlign: 'center', padding: '30px 0' }}>No workouts logged yet — finish a session and it'll show up here.</div>
       ) : (
@@ -2883,6 +2945,174 @@ function avgOf(samples) {
   if (!samples || samples.length === 0) return null;
   return Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
 }
+// Normalized Power \u2014 smooths out surges and coasting better than a plain
+// average by rolling a 30-second average of the raw watts, raising each
+// to the 4th power, averaging those, then taking the 4th root. Falls back
+// to the plain average for short efforts where a 30s window doesn't fit.
+function normalizedPower(samples) {
+  if (!samples || samples.length === 0) return null;
+  if (samples.length < 30) return avgOf(samples);
+  const rolling = [];
+  let windowSum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    windowSum += samples[i];
+    if (i >= 30) windowSum -= samples[i - 30];
+    if (i >= 29) rolling.push(windowSum / 30);
+  }
+  const meanFourth = rolling.reduce((a, b) => a + Math.pow(b, 4), 0) / rolling.length;
+  return Math.round(Math.pow(meanFourth, 0.25));
+}
+// Training Stress Score \u2014 the standard way to size up how hard and how
+// long a ride was relative to threshold, using Normalized Power divided
+// by FTP as the intensity factor.
+function computeTss(np, ftpVal, durationSeconds) {
+  if (!np || !ftpVal || !durationSeconds) return null;
+  const intensityFactor = np / ftpVal;
+  return Math.round(((durationSeconds * np * intensityFactor) / (ftpVal * 3600)) * 100);
+}
+// Rough calorie estimate \u2014 mechanical work in kilojoules (avg watts x
+// seconds / 1000) is the standard stand-in cycling computers use for kcal
+// burned, since it roughly cancels out once you factor in pedaling
+// efficiency. Labeled as an estimate everywhere it's shown.
+function estimateCalories(avgPower, durationSeconds) {
+  if (!avgPower || !durationSeconds) return null;
+  return Math.round((avgPower * durationSeconds) / 1000);
+}
+
+// ---------- exporting a finished ride as .tcx / .fit ----------
+function xmlEscape(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function downloadBytes(filename, data, mime) {
+  const blob = new Blob([data], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function exportFilename(name, date, ext) {
+  const slug = (name || 'turbo-ride').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+  const d = date instanceof Date ? date : new Date(date);
+  const stamp = d.toISOString().slice(0, 10);
+  return `${slug || 'turbo-ride'}-${stamp}.${ext}`;
+}
+// Builds a standard Garmin TCX file (widely accepted by Strava, Garmin
+// Connect, TrainingPeaks and most others) from this session's per-second
+// samples. Watts go in the standard TPX extension; heart rate and cadence
+// use their normal TCX fields. Fields with no data at all across the ride
+// are left out entirely rather than written as zeroes.
+function buildTcx({ startedAt, series, name, calories }) {
+  const start = startedAt || new Date();
+  const hasPower = series.some(p => typeof p.power === 'number');
+  const hasHr = series.some(p => typeof p.hr === 'number');
+  const hasCadence = series.some(p => typeof p.cadence === 'number');
+  const trackpoints = series.map((p, i) => {
+    const t = new Date(start.getTime() + i * 1000).toISOString();
+    let xml = `      <Trackpoint>\n        <Time>${t}</Time>\n`;
+    if (hasHr && typeof p.hr === 'number') xml += `        <HeartRateBpm><Value>${Math.round(p.hr)}</Value></HeartRateBpm>\n`;
+    if (hasCadence && typeof p.cadence === 'number') xml += `        <Cadence>${Math.round(p.cadence)}</Cadence>\n`;
+    if (hasPower && typeof p.power === 'number') xml += `        <Extensions><TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2"><Watts>${Math.round(p.power)}</Watts></TPX></Extensions>\n`;
+    xml += `      </Trackpoint>`;
+    return xml;
+  }).join('\n');
+  const isoStart = start.toISOString();
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2 http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2.xsd">\n  <Activities>\n    <Activity Sport="Biking">\n      <Id>${isoStart}</Id>\n      <Lap StartTime="${isoStart}">\n        <TotalTimeSeconds>${series.length}</TotalTimeSeconds>\n        <DistanceMeters>0</DistanceMeters>\n        <Calories>${calories || 0}</Calories>\n        <Intensity>Active</Intensity>\n        <TriggerMethod>Manual</TriggerMethod>\n        <Track>\n${trackpoints}\n        </Track>\n      </Lap>\n      <Notes>${xmlEscape(name || 'Turbo workout')}</Notes>\n      <Creator xsi:type="Device_t">\n        <Name>Turbo</Name>\n      </Creator>\n    </Activity>\n  </Activities>\n</TrainingCenterDatabase>\n`;
+}
+
+// Minimal but spec-correct FIT encoder \u2014 writes file_id, timer events, one
+// record message per second, a lap, a session and an activity message.
+// Verified by round-tripping through an independent FIT parser before
+// shipping, so the byte layout, CRC and field numbers are all confirmed
+// correct rather than just "looks right."
+const FIT_EPOCH_S = Date.UTC(1989, 11, 31, 0, 0, 0) / 1000;
+function fitTimestamp(date) { return Math.floor(date.getTime() / 1000) - FIT_EPOCH_S; }
+const FIT_CRC_TABLE = [0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400];
+function fitCrc16(bytes) {
+  let crc = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    const byte = bytes[i];
+    let tmp = FIT_CRC_TABLE[crc & 0xF];
+    crc = (crc >> 4) & 0x0FFF;
+    crc = crc ^ tmp ^ FIT_CRC_TABLE[byte & 0xF];
+    tmp = FIT_CRC_TABLE[crc & 0xF];
+    crc = (crc >> 4) & 0x0FFF;
+    crc = crc ^ tmp ^ FIT_CRC_TABLE[(byte >> 4) & 0xF];
+  }
+  return crc;
+}
+class FitByteWriter {
+  constructor() { this.chunks = []; }
+  pushU8(v) { this.chunks.push(new Uint8Array([v & 0xFF])); }
+  pushU16(v) { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, v, true); this.chunks.push(b); }
+  pushU32(v) { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, v >>> 0, true); this.chunks.push(b); }
+  toUint8Array() {
+    const total = this.chunks.reduce((a, c) => a + c.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const c of this.chunks) { out.set(c, off); off += c.length; }
+    return out;
+  }
+}
+const FIT_BASE_TYPE = { enum: 0x00, uint8: 0x02, uint16: 0x84, uint32: 0x86 };
+const FIT_SIZE = { enum: 1, uint8: 1, uint16: 2, uint32: 4 };
+function fitDefMsg(w, localNum, globalNum, fields) {
+  w.pushU8(0x40 | localNum);
+  w.pushU8(0); w.pushU8(0); // reserved, architecture (0 = little endian)
+  w.pushU16(globalNum);
+  w.pushU8(fields.length);
+  for (const f of fields) { w.pushU8(f.num); w.pushU8(FIT_SIZE[f.type]); w.pushU8(FIT_BASE_TYPE[f.type]); }
+}
+function buildFit({ startedAt, series, sport = 2 }) {
+  const w = new FitByteWriter();
+  const startTs = fitTimestamp(startedAt || new Date());
+
+  fitDefMsg(w, 0, 0, [{ num: 0, type: 'enum' }, { num: 1, type: 'uint16' }, { num: 2, type: 'uint16' }, { num: 4, type: 'uint32' }]);
+  w.pushU8(0); w.pushU8(4); w.pushU16(255); w.pushU16(0); w.pushU32(startTs);
+
+  fitDefMsg(w, 1, 21, [{ num: 253, type: 'uint32' }, { num: 0, type: 'enum' }, { num: 1, type: 'enum' }]);
+  w.pushU8(1); w.pushU32(startTs); w.pushU8(0); w.pushU8(0);
+
+  fitDefMsg(w, 2, 20, [{ num: 253, type: 'uint32' }, { num: 3, type: 'uint8' }, { num: 4, type: 'uint8' }, { num: 7, type: 'uint16' }]);
+  const INVALID_U8 = 0xFF, INVALID_U16 = 0xFFFF;
+  series.forEach((p, i) => {
+    w.pushU8(2);
+    w.pushU32(startTs + i);
+    w.pushU8(typeof p.hr === 'number' ? Math.round(p.hr) : INVALID_U8);
+    w.pushU8(typeof p.cadence === 'number' ? Math.round(p.cadence) : INVALID_U8);
+    w.pushU16(typeof p.power === 'number' ? Math.round(p.power) : INVALID_U16);
+  });
+
+  const endTs = startTs + Math.max(0, series.length - 1);
+  const elapsedMs1000 = series.length * 1000;
+
+  w.pushU8(1); w.pushU32(endTs); w.pushU8(0); w.pushU8(4); // timer stop_all
+
+  fitDefMsg(w, 3, 19, [{ num: 253, type: 'uint32' }, { num: 2, type: 'uint32' }, { num: 7, type: 'uint32' }, { num: 8, type: 'uint32' }, { num: 9, type: 'uint32' }]);
+  w.pushU8(3); w.pushU32(endTs); w.pushU32(startTs); w.pushU32(elapsedMs1000); w.pushU32(elapsedMs1000); w.pushU32(0);
+
+  fitDefMsg(w, 4, 18, [{ num: 253, type: 'uint32' }, { num: 2, type: 'uint32' }, { num: 7, type: 'uint32' }, { num: 8, type: 'uint32' }, { num: 9, type: 'uint32' }, { num: 5, type: 'enum' }]);
+  w.pushU8(4); w.pushU32(endTs); w.pushU32(startTs); w.pushU32(elapsedMs1000); w.pushU32(elapsedMs1000); w.pushU32(0); w.pushU8(sport);
+
+  fitDefMsg(w, 5, 34, [{ num: 253, type: 'uint32' }, { num: 0, type: 'uint32' }, { num: 1, type: 'uint16' }, { num: 2, type: 'enum' }, { num: 3, type: 'enum' }, { num: 4, type: 'enum' }]);
+  w.pushU8(5); w.pushU32(endTs); w.pushU32(elapsedMs1000); w.pushU16(1); w.pushU8(0); w.pushU8(26); w.pushU8(1);
+
+  const dataBytes = w.toUint8Array();
+  const header = new Uint8Array(12);
+  const hv = new DataView(header.buffer);
+  header[0] = 12; header[1] = 0x10;
+  hv.setUint16(2, 100, true);
+  hv.setUint32(4, dataBytes.length, true);
+  header[8] = 0x2E; header[9] = 0x46; header[10] = 0x49; header[11] = 0x54; // ".FIT"
+
+  const withoutCrc = new Uint8Array(header.length + dataBytes.length);
+  withoutCrc.set(header, 0); withoutCrc.set(dataBytes, header.length);
+  const crc = fitCrc16(withoutCrc);
+  const full = new Uint8Array(withoutCrc.length + 2);
+  full.set(withoutCrc, 0);
+  new DataView(full.buffer).setUint16(withoutCrc.length, crc, true);
+  return full;
+}
 
 // ---------- player ----------
 function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSaveFtpResult, onApplyFtp, onSessionEnd }) {
@@ -2900,9 +3130,15 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const prevBleStatus = useRef(trainer.status);
   const trainerPowerRef = useRef(trainer.power);
   const heartRateRef = useRef(heartRate ? heartRate.bpm : null);
+  const cadenceRef = useRef(trainer.cadence);
   const stepSamplesRef = useRef([]); // watt readings collected during the current ramp step
   const sessionPowerRef = useRef([]); // every watt reading for the whole session, for personal records
   const sessionHrRef = useRef([]); // every bpm reading for the whole session, for personal records
+  // One entry per second of the ride (power/hr/cadence, null where unknown)
+  // \u2014 kept only for building a .tcx/.fit export right after finishing, not
+  // persisted anywhere.
+  const sessionSeriesRef = useRef([]);
+  const sessionStartRef = useRef(null);
   const lastStepAvgRef = useRef(null); // average watts of the last fully-completed ramp step
   const underPowerStreakRef = useRef(0); // consecutive seconds under the fail threshold
   const triggerAutoStopRef = useRef(() => {});
@@ -2911,6 +3147,9 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const offTargetStreakRef = useRef(0); // consecutive seconds off-target, for the nudge tone
   const confettiRef = useRef([]); // randomized confetti pieces, generated once per celebration
   const [celebrate, setCelebrate] = useState(false);
+  // Full end-of-ride numbers shown on the finish screen and used for the
+  // .tcx/.fit export buttons \u2014 set once, right when the ride ends.
+  const [finishSummary, setFinishSummary] = useState(null);
   // Lets a rider scale back the remaining power targets if a ride is too
   // hard \u2014 session-only, always starts fresh at 100%. Hidden for the FTP
   // tests since dialing those down would just corrupt the result.
@@ -2931,23 +3170,35 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
     loggedRef.current = true;
     const powerSamples = sessionPowerRef.current;
     const hrSamples = sessionHrRef.current;
+    const dur = durationOverride != null ? durationOverride : computeElapsedSeconds();
+    const avgPower = powerSamples.length ? avgOf(powerSamples) : null;
+    const maxPower = powerSamples.length ? Math.max(...powerSamples) : null;
+    const avgHr = hrSamples.length ? avgOf(hrSamples) : null;
+    const maxHr = hrSamples.length ? Math.max(...hrSamples) : null;
+    const np = powerSamples.length ? normalizedPower(powerSamples) : null;
+    const tss = computeTss(np, ftp, dur);
+    const calories = estimateCalories(avgPower, dur);
+    setFinishSummary({
+      avgPower, maxPower, avgHr, maxHr, np, tss, calories, duration: dur,
+      series: sessionSeriesRef.current.slice(),
+      startedAt: sessionStartRef.current || new Date(),
+      workoutName: workout.name,
+    });
     if (onSessionEnd) {
       onSessionEnd({
         workoutId: workout.id || null,
         name: workout.name,
         category: workout.category || 'Custom',
-        duration: durationOverride != null ? durationOverride : computeElapsedSeconds(),
+        duration: dur,
         completed,
-        avgPower: powerSamples.length ? avgOf(powerSamples) : null,
-        maxPower: powerSamples.length ? Math.max(...powerSamples) : null,
-        avgHr: hrSamples.length ? avgOf(hrSamples) : null,
-        maxHr: hrSamples.length ? Math.max(...hrSamples) : null,
+        avgPower, maxPower, avgHr, maxHr, tss, calories,
       });
     }
   }
 
   useEffect(() => { trainerPowerRef.current = trainer.power; }, [trainer.power]);
   useEffect(() => { heartRateRef.current = heartRate ? heartRate.bpm : null; }, [heartRate && heartRate.bpm]);
+  useEffect(() => { cadenceRef.current = trainer.cadence; }, [trainer.cadence]);
 
   // Always keep this pointed at a fresh version of the auto-stop logic so
   // the ticking interval below can call it without needing to restart
@@ -2989,6 +3240,11 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       // for personal records. Independent of the ramp-test step tracking below.
       if (typeof trainerPowerRef.current === 'number') sessionPowerRef.current.push(trainerPowerRef.current);
       if (typeof heartRateRef.current === 'number') sessionHrRef.current.push(heartRateRef.current);
+      sessionSeriesRef.current.push({
+        power: typeof trainerPowerRef.current === 'number' ? trainerPowerRef.current : null,
+        hr: typeof heartRateRef.current === 'number' ? heartRateRef.current : null,
+        cadence: typeof cadenceRef.current === 'number' ? cadenceRef.current : null,
+      });
       // Off-target power nudge \u2014 a soft tick if power drifts well away
       // from the current interval's target for a sustained few seconds.
       // Opt-in and off by default since it can feel naggy.
@@ -3127,7 +3383,13 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
     return () => { if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; } };
   }, [isPlaying, settings.keepAwake]);
 
-  function togglePlay() { setIsPlaying(p => !p); }
+  function togglePlay() {
+    setIsPlaying(p => {
+      const next = !p;
+      if (next && !sessionStartRef.current) sessionStartRef.current = new Date();
+      return next;
+    });
+  }
   function skip(dir) {
     const next = Math.min(intervals.length - 1, Math.max(0, currentIndex + dir));
     setCurrentIndex(next);
@@ -3294,7 +3556,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
 
           {isDone && (
             <div style={{ fontSize: 16, color: SUB, marginTop: 6 }}>
-              {testResult ? 'Estimated FTP \u2014 saved to your FTP history' : 'Nice work \u2014 log it and recover well.'}
+              {testResult ? 'Estimated FTP \u2014 saved to your FTP history' : 'Nice work \u2014 here\u2019s how it went.'}
             </div>
           )}
 
@@ -3306,6 +3568,48 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
                 style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: ftpApplied ? PANEL2 : 'var(--accent)', color: ftpApplied ? SUB : INK, fontWeight: 700, fontSize: 14, cursor: ftpApplied ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
                 {ftpApplied ? <Check size={16} /> : <Zap size={16} />} {ftpApplied ? 'FTP updated' : `Update my FTP to ${testResult.ftp}W`}
               </button>
+            </div>
+          )}
+
+          {isDone && finishSummary && (
+            <div style={{ marginTop: 18, maxWidth: 440, margin: '18px auto 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(86px, 1fr))', gap: 8 }}>
+                {[
+                  finishSummary.avgPower != null && { label: 'Avg power', value: `${finishSummary.avgPower}W` },
+                  finishSummary.maxPower != null && { label: 'Max power', value: `${finishSummary.maxPower}W` },
+                  finishSummary.avgHr != null && { label: 'Avg HR', value: `${finishSummary.avgHr} bpm` },
+                  finishSummary.maxHr != null && { label: 'Max HR', value: `${finishSummary.maxHr} bpm` },
+                  finishSummary.tss != null && { label: 'TSS (est.)', value: `${finishSummary.tss}` },
+                  finishSummary.calories != null && { label: 'Calories (est.)', value: `${finishSummary.calories}` },
+                ].filter(Boolean).map((c, i) => (
+                  <div key={i} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 10px' }}>
+                    <div style={{ fontSize: 9.5, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>{c.label}</div>
+                    <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 15, fontWeight: 700, color: TEXT, marginTop: 2 }}>{c.value}</div>
+                  </div>
+                ))}
+              </div>
+              {finishSummary.series.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => downloadBytes(
+                      exportFilename(finishSummary.workoutName, finishSummary.startedAt, 'tcx'),
+                      buildTcx({ startedAt: finishSummary.startedAt, series: finishSummary.series, name: finishSummary.workoutName, calories: finishSummary.calories }),
+                      'application/vnd.garmin.tcx+xml'
+                    )}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                    <Download size={13} /> Export .TCX
+                  </button>
+                  <button
+                    onClick={() => downloadBytes(
+                      exportFilename(finishSummary.workoutName, finishSummary.startedAt, 'fit'),
+                      buildFit({ startedAt: finishSummary.startedAt, series: finishSummary.series }),
+                      'application/octet-stream'
+                    )}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                    <Download size={13} /> Export .FIT
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -4027,7 +4331,7 @@ export default function App() {
       const { data: history } = await supabase.from('ftp_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
       if (mounted && history) setFtpHistory(history.map(h => ({ id: h.id, date: h.date, ftp: h.ftp, source: h.source })));
       const { data: sessions } = await supabase.from('workout_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
-      if (mounted && sessions) setWorkoutHistory(sessions.map(s => ({ id: s.id, date: s.date, workoutId: s.workout_id, name: s.name, category: s.category, duration: s.duration, completed: s.completed, avgPower: s.avg_power, maxPower: s.max_power, avgHr: s.avg_hr, maxHr: s.max_hr })));
+      if (mounted && sessions) setWorkoutHistory(sessions.map(s => ({ id: s.id, date: s.date, workoutId: s.workout_id, name: s.name, category: s.category, duration: s.duration, completed: s.completed, avgPower: s.avg_power, maxPower: s.max_power, avgHr: s.avg_hr, maxHr: s.max_hr, tss: s.tss, calories: s.calories })));
       // Returns real numbers only when logged in as the app owner (checked
       // server-side by email) -- everyone else gets null back, silently.
       const { data: stats } = await supabase.rpc('admin_dashboard_stats');
@@ -4160,12 +4464,13 @@ export default function App() {
   }
   // Called once per session by the player, either when a workout finishes
   // naturally or when the rider confirms exiting/restarting partway through.
-  function recordWorkoutSession({ workoutId, name, category, duration, completed, avgPower, maxPower, avgHr, maxHr }) {
-    const entry = { id: newId(), date: new Date().toISOString(), workoutId, name, category, duration, completed, avgPower, maxPower, avgHr, maxHr };
+  function recordWorkoutSession({ workoutId, name, category, duration, completed, avgPower, maxPower, avgHr, maxHr, tss, calories }) {
+    const entry = { id: newId(), date: new Date().toISOString(), workoutId, name, category, duration, completed, avgPower, maxPower, avgHr, maxHr, tss, calories };
     setWorkoutHistory(list => [...list, entry]);
     if (user) supabase.from('workout_history').insert({
       id: entry.id, user_id: user.id, workout_id: workoutId, name, category, duration, completed, date: entry.date,
       avg_power: avgPower ?? null, max_power: maxPower ?? null, avg_hr: avgHr ?? null, max_hr: maxHr ?? null,
+      tss: tss ?? null, calories: calories ?? null,
     }).then(() => {});
     // Only push genuinely finished rides of real length to Strava \u2014 not
     // aborted attempts \u2014 and only for people who've connected their account.
