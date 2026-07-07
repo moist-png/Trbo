@@ -134,6 +134,116 @@ export const PURPOSE_LABEL = {
   test: 'FTP test',
 };
 
+// ---------------------------------------------------------------------------
+// 1b. Terrain / character tags (a SECOND, independent axis)
+// ---------------------------------------------------------------------------
+// WORKOUT_PURPOSE (above) answers "how hard does this stress me?" and is
+// load-bearing: the safety rules, the swap system and the slot picker all key
+// off it. This map answers a *different* question — "what does this ride feel
+// like?" — and is deliberately kept separate so it can't disturb any of that.
+//
+// It exists so two same-purpose workouts stop being interchangeable to the
+// generator. "Steady endurance hour" and "Coastal Rollers" are both
+// 'endurance' by purpose, but one is a flat indoor grind and the other is a
+// rolling seaside ride with a sprint and a climb — the terrain axis lets the
+// picker prefer variety across a week and lean on the richer real-world Rides
+// once a rider is past base phase, instead of always defaulting to the
+// plainest option.
+//
+// Each workout carries one or more terrain tags (most-defining first).
+// Vocabulary (kept small on purpose):
+//   flat        — steady, little elevation change
+//   rolling     — gentle repeated ups and downs, no single big climb
+//   sustained-climb — one or more long, steady climbs
+//   steep       — short savage gradients / wall climbs
+//   punchy      — repeated short sharp accelerations or surges
+//   cobbles     — pavé / rough classics terrain
+//   gravel      — unpaved / mixed-surface sectors
+//   windy       — crosswinds, echelons, headwind fights
+//   mixed       — a varied narrative route touching several of the above
+//   scenic      — easy-going / social character (café pace, recovery)
+// ---------------------------------------------------------------------------
+export const WORKOUT_TERRAIN = {
+  // --- Basics (indoor structure; terrain is abstract but still varies) ---
+  'ramp-ftp-test': ['flat'],
+  'ftp-test-20': ['flat'],
+  'endurance-hour': ['flat'],
+  'rolling-endurance': ['rolling'],
+  'sweet-spot-builder': ['sustained-climb'],
+  'threshold-2x20': ['sustained-climb'],
+  'vo2-5x3': ['punchy'],
+  'tabata-torch': ['punchy'],
+  'over-unders': ['sustained-climb'],
+  'rpe-fartlek': ['mixed'],
+  'recovery-spin': ['scenic'],
+  'pyramid-power': ['mixed'],
+  'mixed-metric': ['mixed'],
+  'vo2-40-20-double': ['punchy'],
+  // --- Rides (real-world feel) ---
+  'ride-sunday-club': ['rolling', 'scenic', 'punchy'],
+  'ride-chaingang': ['flat', 'windy'],
+  'ride-century-sim': ['mixed', 'flat', 'sustained-climb'],
+  'ride-coastal-rollers': ['rolling', 'windy', 'punchy'],
+  'ride-alpine-ascent': ['sustained-climb'],
+  'ride-gravel-grinder': ['gravel', 'punchy', 'rolling'],
+  'ride-crosswind-echelon': ['windy', 'flat'],
+  'ride-breakaway-glory': ['mixed', 'punchy'],
+  'ride-audax-200': ['flat', 'scenic'],
+  'ride-crit-sim': ['punchy'],
+  'ride-cafe-ride': ['scenic', 'rolling'],
+  'ride-cobbled-classics': ['cobbles', 'steep'],
+  'ride-group-surges': ['punchy', 'rolling'],
+  'ride-hilly-fondo': ['sustained-climb', 'rolling'],
+  'ride-tt-tuneup': ['flat'],
+  'ride-rainy-survival': ['mixed', 'flat'],
+  'ride-night-steady': ['rolling', 'scenic'],
+  'ride-everesting-lite': ['sustained-climb', 'steep'],
+  'ride-breakaway-stage': ['mixed', 'windy', 'punchy'],
+  'ride-monument-classics': ['cobbles', 'steep'],
+  'ride-bikepacking-haul': ['gravel', 'flat', 'scenic'],
+  'ride-mountain-double': ['sustained-climb'],
+  'ride-urban-commute': ['punchy', 'flat'],
+  'ride-recovery-cruise': ['scenic', 'flat'],
+  'ride-leadout-day': ['punchy', 'flat'],
+  'ride-ridge-traverse': ['rolling', 'windy', 'punchy'],
+  'ride-volcano-rim': ['sustained-climb', 'steep'],
+  'ride-desert-crossing': ['flat', 'windy'],
+  'ride-fjord-switchbacks': ['steep', 'sustained-climb'],
+  'ride-highland-loop': ['rolling', 'windy', 'sustained-climb'],
+  'ride-dolomites-double': ['sustained-climb', 'steep'],
+  'ride-wine-country': ['rolling'],
+  'ride-moorland-crossing': ['windy', 'gravel', 'flat'],
+  'ride-canyon-rim': ['steep', 'punchy'],
+  'ride-alpine-col-chain': ['sustained-climb'],
+  'ride-anti-gravity': ['sustained-climb', 'steep'],
+  'ride-storm-chase': ['windy', 'punchy'],
+  'ride-tt-through-time': ['flat', 'sustained-climb'],
+  'ride-the-gauntlet': ['steep', 'sustained-climb'],
+  'ride-migration-flock': ['windy', 'flat', 'rolling'],
+  'ride-ironman-nice': ['flat', 'sustained-climb'],
+  'ride-ironman-kona': ['flat', 'windy'],
+  'ride-ironman-lanzarote': ['windy', 'steep', 'sustained-climb'],
+  'ride-pyrenees-circle-of-death': ['sustained-climb'],
+  'ride-giro-stelvio': ['sustained-climb'],
+  'ride-giro-zoncolan': ['steep'],
+  'ride-giro-finestre': ['sustained-climb', 'gravel', 'steep'],
+  'ride-tour-ventoux': ['sustained-climb', 'windy'],
+  'ride-tour-alpe-dhuez': ['sustained-climb'],
+  'ride-tour-galibier': ['sustained-climb'],
+  'ride-paris-roubaix': ['cobbles', 'flat'],
+  'ride-tour-of-flanders': ['cobbles', 'steep'],
+  'ride-liege-bastogne-liege': ['rolling', 'sustained-climb'],
+  'ride-milan-san-remo': ['flat', 'punchy'],
+  'ride-vuelta-angliru': ['steep', 'sustained-climb'],
+};
+
+// Human-readable labels for each terrain tag (for any UI that surfaces them).
+export const TERRAIN_LABEL = {
+  flat: 'Flat', rolling: 'Rolling', 'sustained-climb': 'Sustained climb',
+  steep: 'Steep', punchy: 'Punchy', cobbles: 'Cobbles', gravel: 'Gravel',
+  windy: 'Windy', mixed: 'Mixed', scenic: 'Scenic',
+};
+
 // Which purposes count as "high stress" for the hard/easy spacing rule.
 const HIGH_STRESS = new Set(['threshold', 'vo2max', 'anaerobic', 'race']);
 export function isHighStress(purpose) { return HIGH_STRESS.has(purpose); }
@@ -506,8 +616,20 @@ export function maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, reco
   return next;
 }
 
-export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek) {
-  const candidates = library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
+// Pick a concrete library workout for a `purpose`. Beyond just filling the
+// slot, this now shapes *which* workout of that purpose gets chosen so weeks
+// feel varied and the richer library actually gets used. Preferences, in
+// priority order:
+//   1. Never repeat a workout already used this week (existing behaviour).
+//   2. Prefer terrain the week hasn't seen yet (so two 'endurance' days
+//      aren't both flat grinds — one might be coastal rollers instead).
+//   3. Once past base phase, prefer the real-world "Rides" over the plainer
+//      "Basics" where both share the purpose, so named routes (Alpe d'Huez,
+//      Roubaix, etc.) come into play as the plan gets specific.
+// `usedTerrainThisWeek` (a Set) and `phase` are optional; when omitted the
+// function still works and just falls back to id-novelty like before.
+export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTerrainThisWeek, phase) {
+  let candidates = library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
   if (!candidates.length) {
     // Fallback chain so a slot is never empty.
     const fallbackOrder = {
@@ -518,13 +640,43 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek) {
     };
     for (const alt of (fallbackOrder[purpose] || [])) {
       const altCands = library.filter(w => WORKOUT_PURPOSE[w.id] === alt);
-      if (altCands.length) return altCands[0];
+      if (altCands.length) { candidates = altCands; break; }
     }
-    return library.find(w => WORKOUT_PURPOSE[w.id] === 'endurance') || library[0];
+    if (!candidates.length) {
+      return library.find(w => WORKOUT_PURPOSE[w.id] === 'endurance') || library[0];
+    }
   }
-  // Prefer one not already used this week, for variety.
-  const unused = candidates.filter(w => !usedIdsThisWeek.has(w.id));
-  return (unused.length ? unused : candidates)[0];
+
+  // Score every candidate; higher is better. Ties fall back to library order,
+  // which keeps output stable and deterministic.
+  const usedTerrain = usedTerrainThisWeek || new Set();
+  const pastBase = phase && phase !== 'base';
+  function score(w) {
+    let s = 0;
+    // (1) Strongly avoid repeating an exact workout this week.
+    if (usedIdsThisWeek && usedIdsThisWeek.has(w.id)) s -= 100;
+    // (2) Reward terrain the week hasn't used yet — one point per fresh tag.
+    const terrain = WORKOUT_TERRAIN[w.id] || [];
+    const freshTags = terrain.filter(t => !usedTerrain.has(t)).length;
+    s += freshTags * 10;
+    // (3) Past base phase, nudge toward the real-world Rides over Basics.
+    if (pastBase && w.category === 'Rides') s += 3;
+    return s;
+  }
+
+  let best = candidates[0];
+  let bestScore = score(best);
+  for (const w of candidates) {
+    const sc = score(w);
+    if (sc > bestScore) { best = w; bestScore = sc; }
+  }
+  return best;
+}
+
+// Record the terrain tags of a chosen workout into the week's used-terrain
+// set (small helper so both the generator and the rebuild path stay in sync).
+export function markTerrainUsed(usedTerrainThisWeek, workoutId) {
+  (WORKOUT_TERRAIN[workoutId] || []).forEach(t => usedTerrainThisWeek.add(t));
 }
 
 // List all valid swap options for a slot: same-purpose workouts from the
@@ -620,12 +772,14 @@ export function generatePlan({
     let purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, library, weeklySecondsBudget });
     purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     const usedIds = new Set();
+    const usedTerrain = new Set();
     const targetTss = loadTargets[wi];
 
     // First pass: pick a workout per slot at its native length.
     const rawDays = purposeSlots.map(purpose => {
-      const w = pickWorkoutForPurpose(purpose, library, usedIds);
+      const w = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, phase);
       usedIds.add(w.id);
+      markTerrainUsed(usedTerrain, w.id);
       const nativeSeconds = w.intervals.reduce((a, b) => a + b.duration, 0);
       const nativeTss = estimateWorkoutTss(w.intervals);
       return { purpose, workoutId: w.id, name: w.name, nativeSeconds, nativeTss, fixedLength: !!w.fixedLength };
@@ -841,9 +995,11 @@ export function rebuildWeekWorkouts(plan, library, fromWeek) {
     let purposeSlots = weekPurposeSlots({ phase: w.phase, daysPerWeek: plan.daysPerWeek, goal, isRecovery: w.isRecovery, multiSport: plan.multiSport, library, weeklySecondsBudget });
     purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     const usedIds = new Set();
+    const usedTerrain = new Set();
     const rawDays = purposeSlots.map(purpose => {
-      const wk = pickWorkoutForPurpose(purpose, library, usedIds);
+      const wk = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, w.phase);
       usedIds.add(wk.id);
+      markTerrainUsed(usedTerrain, wk.id);
       const nativeSeconds = wk.intervals.reduce((a, b) => a + b.duration, 0);
       const nativeTss = estimateWorkoutTss(wk.intervals);
       return { purpose, workoutId: wk.id, name: wk.name, nativeSeconds, nativeTss, fixedLength: !!wk.fixedLength };
