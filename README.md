@@ -1,6 +1,6 @@
-# Turbo Trainer
+# Trbo Trainer
 
-This is the Turbo Trainer app, connected to a real Supabase database for
+This is the Trbo Trainer app, connected to a real Supabase database for
 accounts, saved workouts, and FTP history.
 
 ## Getting this online (no coding required)
@@ -11,7 +11,7 @@ accounts, saved workouts, and FTP history.
    GitHub repository. Vercel automatically detects this is a Vite project
    \u2014 just click Deploy.
 3. Once deployed, copy the web address Vercel gives you (something like
-   `https://turbo-trainer-yourname.vercel.app`).
+   `https://trbo-trainer-yourname.vercel.app`).
 4. In Supabase: Authentication \u2192 URL Configuration \u2014 set "Site URL" to
    that address, and add it to "Redirect URLs" too. This makes password
    reset links go to the right place.

@@ -3036,7 +3036,7 @@ function buildTcx({ startedAt, series, name, calories }) {
     return xml;
   }).join('\n');
   const isoStart = start.toISOString();
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2 http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2.xsd">\n  <Activities>\n    <Activity Sport="Biking">\n      <Id>${isoStart}</Id>\n      <Lap StartTime="${isoStart}">\n        <TotalTimeSeconds>${series.length}</TotalTimeSeconds>\n        <DistanceMeters>0</DistanceMeters>\n        <Calories>${calories || 0}</Calories>\n        <Intensity>Active</Intensity>\n        <TriggerMethod>Manual</TriggerMethod>\n        <Track>\n${trackpoints}\n        </Track>\n      </Lap>\n      <Notes>${xmlEscape(name || 'Turbo workout')}</Notes>\n      <Creator xsi:type="Device_t">\n        <Name>Turbo</Name>\n      </Creator>\n    </Activity>\n  </Activities>\n</TrainingCenterDatabase>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2 http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2.xsd">\n  <Activities>\n    <Activity Sport="Biking">\n      <Id>${isoStart}</Id>\n      <Lap StartTime="${isoStart}">\n        <TotalTimeSeconds>${series.length}</TotalTimeSeconds>\n        <DistanceMeters>0</DistanceMeters>\n        <Calories>${calories || 0}</Calories>\n        <Intensity>Active</Intensity>\n        <TriggerMethod>Manual</TriggerMethod>\n        <Track>\n${trackpoints}\n        </Track>\n      </Lap>\n      <Notes>${xmlEscape(name || 'Trbo workout')}</Notes>\n      <Creator xsi:type="Device_t">\n        <Name>Trbo</Name>\n      </Creator>\n    </Activity>\n  </Activities>\n</TrainingCenterDatabase>\n`;
 }
 
 // Minimal but spec-correct FIT encoder — writes file_id, timer events, one
@@ -3917,7 +3917,7 @@ function AuthShell({ children, footer }) {
       <div style={{ maxWidth: 380, width: '100%', margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 28 }}>
           <Zap size={22} color="var(--accent)" />
-          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.4 }}>Turbo Trainer</div>
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.4 }}>Trbo Trainer</div>
         </div>
         {children}
         {footer && <div style={{ marginTop: 18, textAlign: 'center' }}>{footer}</div>}
@@ -4193,7 +4193,7 @@ function PaywallView({ blocking, trialExpired, onClose, onLogout, userId, email 
 
       <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 16, marginBottom: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>Turbo Trainer — {plan === 'annual' ? 'Annual' : 'Monthly'}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: TEXT }}>Trbo Trainer — {plan === 'annual' ? 'Annual' : 'Monthly'}</div>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)' }}>{priceLabel}</div>
         </div>
         <div style={{ fontSize: 12, color: SUB, lineHeight: 1.6 }}>

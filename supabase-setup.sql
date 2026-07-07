@@ -1,4 +1,4 @@
--- Turbo Trainer: database setup
+-- Trbo Trainer: database setup
 -- Paste this whole thing into Supabase SQL Editor and click "Run".
 -- Safe to re-run in full any time \u2014 every statement below either checks
 -- "if exists"/"if not exists" first or uses "create or replace", so running
@@ -132,7 +132,7 @@ alter table public.workout_history add column if not exists max_hr integer;
 --    appear in their app.
 --
 --    Already set below to freddiesmuscles@gmail.com \u2014 if you ever log into
---    Turbo with a different email, update the address in the line below
+--    Trbo with a different email, update the address in the line below
 --    to match, then re-run this file.
 create or replace function public.admin_dashboard_stats()
 returns json as $$
