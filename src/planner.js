@@ -199,6 +199,11 @@ export const GOALS = {
     blurb: 'Prepare for a long endurance day in the saddle.',
     hasEvent: true,
     emphasis: { endurance: 4, tempo: 2, threshold: 1 },
+    // A 100-mile route usually has some real elevation. This doesn't compete
+    // with the weighted mix above (which already guarantees the tempo/
+    // threshold day every week) — it's an occasional extra, swapped in on
+    // top of that roughly once every few weeks. See maybeInjectPeriodicPurpose.
+    periodicPurpose: { purpose: 'climbing', loadingWeeksPerCycle: 3 },
   },
   'hill-climb': {
     label: 'Hill climb / mountains',
@@ -455,6 +460,52 @@ export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSp
 
 // Pick a concrete library workout for a purpose. `library` is the app's
 // LIBRARY array. Prefers workouts of the right purpose; falls back sensibly.
+
+// ---------------------------------------------------------------------------
+// 6b. Occasional goal-specific sessions (e.g. a climbing day for a century)
+// ---------------------------------------------------------------------------
+// Some goals want a purpose to show up occasionally without it competing in
+// the main weighted mix above (which would either make it appear every week
+// or never, since that mix is a deterministic pick each week, not a random
+// draw). `goal.periodicPurpose = { purpose, loadingWeeksPerCycle }` instead
+// swaps it in on a fixed cadence measured in LOADING weeks (recovery/taper
+// weeks don't count, so "every 3 loading weeks" lines up with "once per
+// 4-week block" for a normal solo rider's recovery cadence).
+// ---------------------------------------------------------------------------
+
+// 1-based count of loading (non-recovery, non-taper) weeks up to and
+// including weekIndex (0-based index into phaseByWeek/recoveryFlags).
+function loadingWeekOrdinal(phaseByWeek, recoveryFlags, weekIndex) {
+  let count = 0;
+  for (let i = 0; i <= weekIndex; i++) {
+    if (phaseByWeek[i] !== 'taper' && !recoveryFlags[i]) count++;
+  }
+  return count;
+}
+
+// Returns a possibly-modified copy of `purposeSlots` for this week. Only
+// ever replaces a spare endurance slot (never the guaranteed anchor at index
+// 0, and never a tempo/threshold slot) so it's strictly additive to the
+// mix the rest of the system already guarantees.
+export function maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, weekIndex) {
+  const spec = goal.periodicPurpose;
+  if (!spec) return purposeSlots;
+  if (phaseByWeek[weekIndex] === 'taper' || recoveryFlags[weekIndex]) return purposeSlots;
+  const ordinal = loadingWeekOrdinal(phaseByWeek, recoveryFlags, weekIndex);
+  if (ordinal % spec.loadingWeeksPerCycle !== 0) return purposeSlots;
+
+  // Find a spare endurance slot (not the index-0 anchor) to swap.
+  let swapIndex = -1;
+  for (let i = purposeSlots.length - 1; i >= 1; i--) {
+    if (purposeSlots[i] === 'endurance') { swapIndex = i; break; }
+  }
+  if (swapIndex === -1) return purposeSlots; // no spare slot; skip this cycle rather than bump tempo/threshold
+
+  const next = [...purposeSlots];
+  next[swapIndex] = spec.purpose;
+  return next;
+}
+
 export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek) {
   const candidates = library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
   if (!candidates.length) {
@@ -566,7 +617,8 @@ export function generatePlan({
 
   const weeks = phaseByWeek.map((phase, wi) => {
     const isRecovery = recoveryFlags[wi];
-    const purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, library, weeklySecondsBudget });
+    let purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, library, weeklySecondsBudget });
+    purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     const usedIds = new Set();
     const targetTss = loadTargets[wi];
 
@@ -778,10 +830,16 @@ export function applyCheckin(plan, weekNumber, feedback, library) {
 export function rebuildWeekWorkouts(plan, library, fromWeek) {
   const weeklySecondsBudget = (plan.weeklyHours || 4) * 3600;
   const goal = GOALS[plan.goalKey] || GOALS['general-fitness'];
+  // Same source of truth the periodic-injection cadence used at original
+  // generation time, so a rebuild (e.g. after a check-in) lands on the same
+  // cadence rather than drifting.
+  const phaseByWeek = plan.weeks.map(w => w.phase);
+  const recoveryFlags = plan.weeks.map(w => w.isRecovery);
 
-  const weeks = plan.weeks.map(w => {
+  const weeks = plan.weeks.map((w, wi) => {
     if (w.weekNumber < fromWeek) return w;
-    const purposeSlots = weekPurposeSlots({ phase: w.phase, daysPerWeek: plan.daysPerWeek, goal, isRecovery: w.isRecovery, multiSport: plan.multiSport, library, weeklySecondsBudget });
+    let purposeSlots = weekPurposeSlots({ phase: w.phase, daysPerWeek: plan.daysPerWeek, goal, isRecovery: w.isRecovery, multiSport: plan.multiSport, library, weeklySecondsBudget });
+    purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     const usedIds = new Set();
     const rawDays = purposeSlots.map(purpose => {
       const wk = pickWorkoutForPurpose(purpose, library, usedIds);
