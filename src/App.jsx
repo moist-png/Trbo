@@ -508,6 +508,33 @@ function smartScaleWorkout(originalIntervals, targetSeconds, repeatWholeCore) {
   return assembleScaled(originalIntervals, classes, groups, inGroup, durations, []);
 }
 
+// ---------- public demo ride ----------
+// Shown to signed-out visitors only (reached via a "Try a demo ride" link
+// that appends ?demo=ride to the URL — see the demoMode check in App()).
+// Deliberately NOT part of LIBRARY, so it can never appear in a logged-in
+// user's workout library. Runs on a fixed 200W assumed FTP since there's no
+// account to read a real one from. Built to sell the app in ~10 minutes: a
+// smooth ERG ramp up (so the resistance change feels like real terrain),
+// then two short hard/easy snaps (so the trainer's responsiveness is
+// obvious), then an easy cool down.
+const DEMO_FTP = 200;
+const DEMO_WORKOUT = {
+  id: 'demo-ride', name: 'Demo ride', category: 'Demo',
+  description: 'A quick taste of Trbo — connect your trainer and feel it respond in real time.',
+  intervals: [
+    iv('Easy spin', 90, 'power', 55),
+    iv('Roll up', 60, 'power', 65),
+    iv('Roll up', 60, 'power', 75),
+    iv('Roll up', 60, 'power', 85),
+    iv('Roll up', 60, 'power', 95),
+    iv('Hard', 30, 'power', 125),
+    iv('Easy', 30, 'power', 50),
+    iv('Hard', 30, 'power', 125),
+    iv('Easy', 30, 'power', 50),
+    iv('Cool down', 150, 'power', 50),
+  ],
+};
+
 // ---------- preloaded library ----------
 const LIBRARY = [
   {
@@ -3134,7 +3161,7 @@ function buildFit({ startedAt, series, sport = 2 }) {
 }
 
 // ---------- player ----------
-function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSaveFtpResult, onApplyFtp, onSessionEnd }) {
+function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSaveFtpResult, onApplyFtp, onSessionEnd, isDemo }) {
   const intervals = workout.intervals;
   const isRampTest = !!workout.autoStopTest;
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -3501,12 +3528,24 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
           {!isDone ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
               {canAdjustIntensity ? (
-                <button onClick={() => setShowIntensityAdjust(v => !v)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', minWidth: 80, cursor: 'pointer', textAlign: 'left' }}>
-                  <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>
-                    Target{intensityAdjust !== 1 ? ` · ${Math.round(intensityAdjust * 100)}%` : ''}
-                  </div>
-                  <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, fontWeight: 700, color: TEXT, marginTop: 2 }}>{targetTxt}</div>
-                </button>
+                <div style={{ position: 'relative' }}>
+                  {isDemo && !showIntensityAdjust && (
+                    <div style={{
+                      position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: 8,
+                      background: 'var(--accent)', color: INK, fontSize: 11, fontWeight: 700, padding: '5px 10px',
+                      borderRadius: 8, whiteSpace: 'nowrap', animation: 'demo-tag-bounce 1.8s ease-in-out infinite', pointerEvents: 'none', zIndex: 2,
+                    }}>
+                      Tap to adjust intensity
+                      <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid var(--accent)' }} />
+                    </div>
+                  )}
+                  <button onClick={() => setShowIntensityAdjust(v => !v)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', minWidth: 80, cursor: 'pointer', textAlign: 'left' }}>
+                    <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>
+                      Target{intensityAdjust !== 1 ? ` · ${Math.round(intensityAdjust * 100)}%` : ''}
+                    </div>
+                    <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, fontWeight: 700, color: TEXT, marginTop: 2 }}>{targetTxt}</div>
+                  </button>
+                </div>
               ) : (
                 <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', minWidth: 80 }}>
                   <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Target</div>
@@ -4291,6 +4330,13 @@ export default function App() {
   const [detailPresetMinutes, setDetailPresetMinutes] = useState(null); // set when opening from the planner
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [activeWorkout, setActiveWorkout] = useState(null);
+  // Public, signed-out preview — reached via a link ending in ?demo=ride
+  // (the entry-point button on the login screen is added separately).
+  // Takes priority over everything else, including an active session,
+  // since it's meant to work for visitors with no account at all.
+  const [demoMode, setDemoMode] = useState(() => (
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === 'ride'
+  ));
   const trainer = useTrainer();
   const heartRate = useHeartRate();
 
@@ -4618,8 +4664,35 @@ export default function App() {
     + " @media (orientation: landscape) { .player-main { flex-direction: row !important; align-items: center; justify-content: center; gap: 20px; } .player-stats { flex: 1 1 auto; max-width: 560px; } .player-controls { flex: 0 0 auto; } }"
     + " @media (orientation: landscape) and (max-height: 420px) { .player-timer { font-size: 38px !important; } .ring-box { width: 120px !important; height: 120px !important; } .ring-box svg { width: 120px !important; height: 120px !important; } .player-controls-row { margin-top: 6px !important; } }"
     // finish-line celebration confetti
-    + " @keyframes confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(420px) rotate(600deg); opacity: 0; } }";
+    + " @keyframes confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(420px) rotate(600deg); opacity: 0; } }"
+    // gentle bounce drawing a first-time demo visitor's eye to the intensity dial
+    + " @keyframes demo-tag-bounce { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-4px); } }";
   const wrapStyle = { '--accent': theme.accent || settings.accentColor, ...themeVars, background: BG, minHeight: '100%', fontFamily: 'Inter, sans-serif' };
+
+  // ---- public demo ride: no account needed, takes priority over auth ----
+  if (demoMode) {
+    return (
+      <div style={wrapStyle}>
+        <style>{globalStyle}</style>
+        <OrientationGate preferredOrientation={DEFAULT_SETTINGS.preferredOrientation}>
+          <PlayerView
+            workout={DEMO_WORKOUT}
+            ftp={DEMO_FTP}
+            settings={{ ...DEFAULT_SETTINGS, ergMode: true }}
+            trainer={trainer}
+            heartRate={heartRate}
+            isDemo
+            onExit={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('demo');
+              window.history.replaceState({}, '', url);
+              setDemoMode(false);
+            }}
+          />
+        </OrientationGate>
+      </div>
+    );
+  }
 
   if (authLoading) {
     return <div style={wrapStyle}><style>{globalStyle}</style></div>;
