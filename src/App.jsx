@@ -4,10 +4,11 @@ import {
   Search, Library, Wrench, Gauge, Save, Edit3, Copy, Settings as SettingsIcon, Bluetooth,
   BluetoothOff, Volume2, Sun, Moon, RefreshCw, Check, Zap, ChevronDown as ChevDown, Bike, Dumbbell, Home,
   Trophy, HeartPulse, Upload, Flame, Link as LinkIcon, CalendarDays, BarChart3, Locate, Download,
-  Target, Flag, TrendingUp,
+  Target, Flag, TrendingUp, Gamepad2,
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import PlannerView from './PlannerView';
+import { MiniGamesView, MiniGamePlayer } from './MiniGames';
 
 // ---------- palette ----------
 // TEXT/SUB/PANEL/PANEL2/LINE/RED/BG/MUTED resolve through CSS custom
@@ -2338,6 +2339,7 @@ function HomeView({ account, ftpHistory, workoutHistory, trainingPlan, onNavigat
     { key: 'basics', label: 'Workouts', caption: `${workoutCount} structured sessions · intervals, sweet spot, VO2`, icon: Dumbbell, photo: '/images/home-workouts.jpg', photoPos: 'center 45%', ink: 'var(--hero1-ink)', chip: 'var(--hero1-chip)' },
     { key: 'rides', label: 'Rides', caption: `${rideCount} long routes · mixed-terrain, real-world feel`, icon: Bike, photo: '/images/home-rides.jpg', photoPos: 'center 74%', ink: 'var(--hero2-ink)', chip: 'var(--hero2-chip)' },
     { key: 'planner', label: 'Planner', caption: plannerCaption, icon: CalendarDays, photo: '/images/home-planner.jpg', surface: 'var(--hero3)', photoPos: 'center 45%', ink: 'var(--hero3-ink)', chip: 'var(--hero3-chip)' },
+    { key: 'games', label: 'Mini Games', caption: 'Short, replayable power games \u00b7 chase, survive, beat the pros', icon: Gamepad2, surface: 'var(--hero3)', ink: 'var(--hero3-ink)', chip: 'var(--hero3-chip)' },
   ];
   const slim = [
     { key: 'builder', label: 'Builder', icon: Wrench },
@@ -4330,6 +4332,7 @@ export default function App() {
   const [detailPresetMinutes, setDetailPresetMinutes] = useState(null); // set when opening from the planner
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [activeWorkout, setActiveWorkout] = useState(null);
+  const [activeGame, setActiveGame] = useState(null); // a mini game currently being played (or null)
   // Public, signed-out preview — reached via a link ending in ?demo=ride
   // (the entry-point button on the login screen is added separately).
   // Takes priority over everything else, including an active session,
@@ -4750,6 +4753,15 @@ export default function App() {
     );
   }
 
+  if (activeGame) {
+    return (
+      <div style={wrapStyle}>
+        <style>{globalStyle}</style>
+        <MiniGamePlayer game={activeGame} ftp={ftp} trainer={trainer} heartRate={heartRate} onExit={() => setActiveGame(null)} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ ...wrapStyle, position: 'relative', paddingBottom: 'calc(54px + env(safe-area-inset-bottom))' }}>
       <style>{globalStyle}</style>
@@ -4760,6 +4772,7 @@ export default function App() {
         {view === 'library' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} />}
         {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" />}
         {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" />}
+        {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
         {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} />}
         {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
         {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
