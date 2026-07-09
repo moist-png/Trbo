@@ -401,8 +401,14 @@ const attackGame = {
 // =============================================================================
 // GAME 5 — Beat the Pros
 // Real, unscaled professional power numbers. No FTP scaling, no mercy —
-// you experience the literal demands of elite racing.
+// you experience the literal demands of elite racing. Every effort opens
+// with a rolling start (easy spin, then a ramp) so the flywheel is already
+// moving before the hard part — no picking the anvil up off the floor.
 // =============================================================================
+const PRO_LEAD_IN = 15;   // seconds spinning easy before the ramp
+const PRO_RAMP = 15;      // seconds ramping from the easy start up to target
+const PRO_START_W = 150;  // gentle rolling-start wattage
+
 const prosGame = {
   id: 'pros',
   title: 'Beat the Pros',
@@ -412,6 +418,8 @@ const prosGame = {
   icon: Mountain,
   color: '#C9F031',
   scoreUnit: 'time held at pro power',
+  usesErg: true,
+  ergStartWatts: PRO_START_W,
   variants: [
     { id: 'sprint', name: 'Finish-line Sprint', watts: 1000, seconds: 15, note: 'WorldTour sprinters unload well over 1,000W in the final dash for the line.' },
     { id: 'attack', name: 'Summit Attack', watts: 550, seconds: 120, note: 'Race-winning mountain attacks are launched around 550W — and held for minutes.' },
@@ -421,57 +429,95 @@ const prosGame = {
   ],
   howTo: [
     'Pick a real professional benchmark effort. The wattage is literal — exactly what the pros put out, not scaled to your FTP.',
-    'Hold the target power. Your rolling average must stay above 92% of it.',
-    'Slip below for 8 straight seconds and the effort is over — your score is how long you lasted.',
-    'Hold on for the full duration to actually beat the pros.',
+    'Every effort opens with a rolling start: 15 seconds spinning easy at 150W, then a smooth 15-second ramp up to the target, so the flywheel is already moving before the hard part.',
+    'Once you\u2019re at pro power, hold it — your rolling average must stay above 92% of the target.',
+    'Slip below for 8 straight seconds and the effort is over. Your score is how long you held pro power; last the full duration to actually beat the pros.',
   ],
   init(ftp, variant) {
-    return { variant, elapsed: 0, below: 0, samples: [], finished: false, win: false, score: 0, avg: 0 };
+    return { variant, elapsed: 0, holdElapsed: 0, below: 0, samples: [], phase: 'lead', curTarget: PRO_START_W, ergTarget: PRO_START_W, finished: false, win: false, score: 0, avg: 0 };
   },
   tick(s, power, dt, api) {
     s.elapsed += dt;
-    s.samples.push(power);
-    if (s.samples.length > 20) s.samples.shift(); // rolling ~5s at 4Hz
-    const rolling = s.samples.reduce((a, b) => a + b, 0) / s.samples.length;
-    s.avg = rolling;
     const target = s.variant.watts;
-    if (s.elapsed > 5 && rolling < target * 0.92) {
-      if (s.below === 0) api.beep(300, 0.12, 0.12);
-      s.below += dt;
+    // rolling-start curve: easy spin → linear ramp → hold at target
+    let cur;
+    if (s.elapsed < PRO_LEAD_IN) {
+      cur = PRO_START_W; s.phase = 'lead';
+    } else if (s.elapsed < PRO_LEAD_IN + PRO_RAMP) {
+      const f = (s.elapsed - PRO_LEAD_IN) / PRO_RAMP;
+      cur = PRO_START_W + (target - PRO_START_W) * f; s.phase = 'ramp';
     } else {
-      s.below = 0;
+      cur = target;
+      if (s.phase !== 'hold') { s.phase = 'hold'; s.samples = []; s.below = 0; api.beep(880, 0.16, 0.14); }
     }
-    if (s.below >= 8) { s.finished = true; s.win = false; s.score = Math.round(s.elapsed); }
-    if (s.elapsed >= s.variant.seconds) { s.finished = true; s.win = true; s.score = s.variant.seconds; }
+    s.curTarget = cur;
+    s.ergTarget = cur;
+
+    if (s.phase === 'hold') {
+      s.holdElapsed += dt;
+      s.samples.push(power);
+      if (s.samples.length > 20) s.samples.shift(); // rolling ~5s at 4Hz
+      const rolling = s.samples.reduce((a, b) => a + b, 0) / s.samples.length;
+      s.avg = rolling;
+      if (s.holdElapsed > 3 && rolling < target * 0.92) {
+        if (s.below === 0) api.beep(300, 0.12, 0.12);
+        s.below += dt;
+      } else {
+        s.below = 0;
+      }
+      if (s.below >= 8) { s.finished = true; s.win = false; s.score = Math.round(s.holdElapsed); }
+      if (s.holdElapsed >= s.variant.seconds) { s.finished = true; s.win = true; s.score = s.variant.seconds; }
+    } else {
+      s.avg = power; // during spin-up just mirror current power
+    }
     return s;
   },
   betterScore(a, b) { return a > b; },
   formatScore(v) { return fmtTime(v); },
   Render({ state, power }) {
     const target = state.variant.watts;
+    const cur = Math.round(state.curTarget);
+    const inHold = state.phase === 'hold';
     const maxScale = Math.max(target * 1.3, power * 1.1);
     const youPct = clamp((power / maxScale) * 100, 0, 100);
-    const targetPct = (target / maxScale) * 100;
+    const targetPct = (cur / maxScale) * 100; // marker rides the ramp so you can chase it
     const rolling = Math.round(state.avg);
-    const onPace = rolling >= target * 0.92;
-    const remaining = state.variant.seconds - state.elapsed;
+    const onPace = inHold ? rolling >= target * 0.92 : true;
+    const remaining = state.variant.seconds - state.holdElapsed;
+
+    let banner, sub, bannerBg, bannerInk;
+    if (state.phase === 'lead') {
+      banner = `ROLLING START \u00b7 ${PRO_START_W}W`;
+      sub = 'Spin easy — getting the flywheel moving.';
+      bannerBg = PANEL; bannerInk = TEXT;
+    } else if (state.phase === 'ramp') {
+      banner = `RAMPING UP \u00b7 ${cur}W`;
+      sub = 'Wind it up smoothly toward pro power\u2026';
+      bannerBg = '#FF9F40'; bannerInk = INK;
+    } else {
+      banner = `HOLD ${target}W`;
+      sub = onPace
+        ? 'On pro pace. This is what they feel like the whole race.'
+        : (state.below > 0 ? `Below pro pace — ${Math.ceil(8 - state.below)}s before you blow!` : 'Lift it back to pro power!');
+      bannerBg = onPace ? '#C9F031' : '#FF6B4A'; bannerInk = INK;
+    }
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center', width: '100%' }}>
         <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 18, fontWeight: 600, color: TEXT }}>{state.variant.name}</div>
+        <div style={{ padding: '9px 20px', borderRadius: 12, fontFamily: 'Oswald, sans-serif', fontSize: 20, fontWeight: 700, letterSpacing: 0.8, background: bannerBg, color: bannerInk, border: `1px solid ${bannerBg === PANEL ? LINE : bannerBg}` }}>
+          {banner}
+        </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <StatChip label="Pro target" value={`${target}W`} color="#C9F031" />
-          <StatChip label="You (5s avg)" value={`${rolling}W`} color={onPace ? 'var(--accent)' : '#FF6B4A'} />
-          <StatChip label="To go" value={fmtTime(remaining)} />
+          <StatChip label={inHold ? 'Pro target' : 'Follow'} value={`${inHold ? target : cur}W`} color="#C9F031" />
+          <StatChip label={inHold ? 'You (5s avg)' : 'You'} value={`${inHold ? rolling : power}W`} color={onPace ? 'var(--accent)' : '#FF6B4A'} />
+          <StatChip label={inHold ? 'To go' : 'Effort'} value={inHold ? fmtTime(remaining) : fmtTime(state.variant.seconds)} />
         </div>
         <div style={{ position: 'relative', width: '100%', maxWidth: 380, height: 44, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${youPct}%`, background: onPace ? 'var(--accent)' : '#FF6B4A', opacity: 0.85, transition: 'width 0.25s linear' }} />
-          <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${targetPct}%`, width: 3, background: TEXT }} />
+          <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${targetPct}%`, width: 3, background: TEXT, transition: 'left 0.25s linear' }} />
         </div>
-        <div style={{ fontSize: 12.5, color: onPace ? SUB : '#FF6B4A', fontWeight: onPace ? 400 : 700 }}>
-          {!onPace && state.below > 0
-            ? `Below pro pace — ${Math.ceil(8 - state.below)}s before you blow!`
-            : 'On pro pace. This is what they feel like the whole race.'}
-        </div>
+        <div style={{ fontSize: 12.5, color: onPace ? SUB : '#FF6B4A', fontWeight: onPace ? 400 : 700 }}>{sub}</div>
       </div>
     );
   },
@@ -546,10 +592,18 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit }) {
   const powerRef = useRef(0);
   const simPowerRef = useRef(simPower);
   const wakeLockRef = useRef(null);
+  const lastErgRef = useRef(null); // last ERG target written, to avoid redundant BLE writes
   const beep = useGameBeeper();
 
   useEffect(() => { simPowerRef.current = simPower; }, [simPower]);
   useEffect(() => { powerRef.current = trainer.power !== null ? trainer.power : (simMode ? simPowerRef.current : 0); }, [trainer.power, simMode, simPower]);
+
+  // Skill games (chase, lava, etc.) need the rider to freely vary their own
+  // power, so make sure the trainer isn't left in ERG from a previous game.
+  useEffect(() => {
+    if (!game.usesErg && trainer.hasControl && trainer.endErg) trainer.endErg();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pbKey = variant ? `${game.id}:${variant.id}` : game.id;
 
@@ -564,6 +618,13 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit }) {
     if (countdown <= 0) {
       stateRef.current = game.init(ftp, variant);
       lastTickRef.current = performance.now();
+      // Prime the trainer at the gentle rolling-start wattage so the flywheel
+      // is light the instant the game starts — no lifting the anvil.
+      if (game.usesErg && trainer.hasControl) {
+        const startW = game.ergStartWatts || 150;
+        trainer.setErgTarget(startW);
+        lastErgRef.current = startW;
+      }
       beep(880, 0.18, 0.14);
       setPhase('playing');
       try { navigator.wakeLock && navigator.wakeLock.request('screen').then(l => { wakeLockRef.current = l; }).catch(() => {}); } catch (e) {}
@@ -584,7 +645,14 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit }) {
       const power = trainer.power !== null ? trainer.power : (simMode ? simPowerRef.current : 0);
       const s = game.tick(stateRef.current, power, dt, { ftp, beep });
       stateRef.current = s;
+      // Drive the trainer along the game's target curve (rolling start → ramp
+      // → hold) so ERG resistance eases in instead of slamming to full watts.
+      if (game.usesErg && trainer.hasControl && s.ergTarget != null) {
+        const w = Math.round(s.ergTarget);
+        if (w !== lastErgRef.current) { trainer.setErgTarget(w); lastErgRef.current = w; }
+      }
       if (s.finished) {
+        if (game.usesErg && trainer.hasControl && trainer.endErg) trainer.endErg();
         const pbs = loadPBs();
         const prev = pbs[pbKey];
         const isPB = s.score > 0 && (!prev || game.betterScore(s.score, prev.score));
@@ -600,7 +668,11 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit }) {
     return () => clearInterval(iv);
   }, [phase, simMode]);
 
-  useEffect(() => () => { try { wakeLockRef.current && wakeLockRef.current.release(); } catch (e) {} }, []);
+  useEffect(() => () => {
+    try { wakeLockRef.current && wakeLockRef.current.release(); } catch (e) {}
+    if (game.usesErg && trainer.hasControl && trainer.endErg) trainer.endErg();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const power = trainer.power !== null ? trainer.power : (simMode ? simPower : 0);
   const noSource = trainer.status !== 'connected' && !simMode;

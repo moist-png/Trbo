@@ -1752,7 +1752,18 @@ function useTrainer() {
       await controlRef.current.writeValue(buf);
     } catch (e) {}
   }
-  return { supported, status, deviceName, errorMsg, power, cadence, hasControl, connect, disconnect, setErgTarget };
+  // Leave ERG/target-power mode and hand power control back to the rider by
+  // switching the trainer into flat "simulation" mode (0% grade, no wind).
+  // Used by the mini games so that after a fixed-power game like Beat the
+  // Pros the trainer isn't left holding a target the rider can't vary.
+  async function endErg() {
+    if (!controlRef.current) return;
+    try {
+      // FTMS Set Indoor Bike Simulation Parameters (0x11), all values zero.
+      await controlRef.current.writeValue(new Uint8Array([0x11, 0, 0, 0, 0, 0, 0]));
+    } catch (e) {}
+  }
+  return { supported, status, deviceName, errorMsg, power, cadence, hasControl, connect, disconnect, setErgTarget, endErg };
 }
 
 // Standard Bluetooth Heart Rate Service (0x180D) / Heart Rate Measurement
