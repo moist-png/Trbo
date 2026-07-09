@@ -2061,6 +2061,40 @@ function ConfirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 
 // `presetMinutes` (optional): when opened from the training planner, the sheet
 // starts pre-scaled to the plan's target length for that day instead of the
 // workout's native length.
+// A number field for FTP that you can actually clear. The trouble with
+// binding an <input> straight to a clamped number is that the moment the box
+// is empty it reads as 0, snaps up to the minimum, and refills — so you can
+// never wipe it to type a fresh value. This keeps a local text "draft" so the
+// field can sit empty while you type, and only commits a clamped whole number
+// when you click away or press Enter. Left empty, it simply keeps your
+// previous FTP rather than jumping to the minimum.
+function FtpInput({ ftp, setFtp, style }) {
+  const [draft, setDraft] = useState(String(ftp));
+  const [focused, setFocused] = useState(false);
+  // Reflect external changes (e.g. applying an FTP test result) unless the
+  // person is mid-edit in this very field.
+  useEffect(() => { if (!focused) setDraft(String(ftp)); }, [ftp, focused]);
+  function commit() {
+    const n = parseInt(draft, 10);
+    if (!Number.isFinite(n) || draft.trim() === '') { setDraft(String(ftp)); return; } // left blank → keep current
+    const clamped = Math.min(600, Math.max(50, n));
+    setFtp(clamped);
+    setDraft(String(clamped));
+  }
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+      onBlur={() => { setFocused(false); commit(); }}
+      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      style={style}
+    />
+  );
+}
+
 function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdit, isCustom, onDelete, onSaveScaled, presetMinutes }) {
   const originalTotal = totalDuration(workout.intervals);
   const scalable = !workout.fixedLength;
@@ -2122,7 +2156,7 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
             <Gauge size={18} color="var(--accent)" />
             <span style={{ fontSize: 13, color: SUB }}>Your FTP</span>
-            <input type="number" value={ftp} onChange={e => setFtp(Math.max(50, Number(e.target.value) || 0))}
+            <FtpInput ftp={ftp} setFtp={setFtp}
               style={{ width: 80, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '6px 8px', fontSize: 14 }} />
             <span style={{ fontSize: 13, color: SUB }}>watts</span>
           </div>
@@ -2573,7 +2607,7 @@ function FtpView({ ftp, setFtp, ftpHistory, onClearFtpHistory, onOpenWorkout }) 
           <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 32, fontWeight: 700, color: TEXT }}>{ftp}W</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input type="number" value={ftp} onChange={e => setFtp(Math.max(50, Number(e.target.value) || 0))}
+          <FtpInput ftp={ftp} setFtp={setFtp}
             style={{ width: 72, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '8px 10px', fontSize: 14, textAlign: 'center' }} />
           <span style={{ fontSize: 12.5, color: SUB }}>W</span>
         </div>
@@ -3895,7 +3929,7 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
       <SectionHeader icon={<Gauge size={16} color="var(--accent)" />} title="General" />
       <SettingRow label="FTP" sub="Used to calculate watt targets from % FTP">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input type="number" value={ftp} onChange={e => setFtp(Math.max(50, Number(e.target.value) || 0))}
+          <FtpInput ftp={ftp} setFtp={setFtp}
             style={{ width: 70, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '6px 8px', fontSize: 14 }} />
           <span style={{ fontSize: 13, color: SUB }}>W</span>
         </div>
