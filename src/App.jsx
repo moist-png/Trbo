@@ -1763,6 +1763,123 @@ const LIBRARY = [
       iv('Cool down', 600, 'power', 50),
     ],
   },
+  // ------------------------------------------------------------------------
+  // Sprint Ladder (Basics) — neuromuscular sprint work. Anaerobic was the
+  // thinnest purpose in the library; this adds a structured all-out ladder
+  // with long full recoveries so every rep is genuinely maximal.
+  // ------------------------------------------------------------------------
+  {
+    id: 'sprint-ladder', name: 'Sprint Ladder', category: 'Basics',
+    description: 'Maximal sprints climbing then dropping in length — 5 up to 20 seconds and back — with long full recoveries so every one is flat out.',
+    intervals: [
+      iv('Warm up', 480, 'power', 60),
+      iv('Primer sprint', 8, 'rpe', 9), iv('Easy spin', 172, 'power', 55),
+      iv('Sprint — 5s', 5, 'rpe', 10), iv('Full recovery', 235, 'power', 50),
+      iv('Sprint — 10s', 10, 'rpe', 10), iv('Full recovery', 230, 'power', 50),
+      iv('Sprint — 15s', 15, 'rpe', 10), iv('Full recovery', 225, 'power', 50),
+      iv('Sprint — 20s', 20, 'rpe', 10), iv('Full recovery', 240, 'power', 50),
+      iv('Sprint — 15s', 15, 'rpe', 10), iv('Full recovery', 225, 'power', 50),
+      iv('Sprint — 10s', 10, 'rpe', 10), iv('Full recovery', 230, 'power', 50),
+      iv('Sprint — 5s', 5, 'rpe', 10), iv('Full recovery', 235, 'power', 50),
+      iv('Cool down', 420, 'power', 50),
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // Strade Bianche (Rides · race) — the Tuscan gravel monument. Deepens the
+  // thin gravel terrain and adds a distinct steep-gravel-ramp character,
+  // finishing on the savage wall into Siena's Piazza del Campo.
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-strade-bianche', name: 'Strade Bianche — The White Roads', category: 'Rides',
+    description: 'Tuscany’s gravel monument — rolling tempo between brutal white-gravel sectors, saving just enough for the savage ramp up to the Piazza del Campo in Siena.',
+    intervals: [
+      iv('Warm up', 720, 'power', 55),
+      iv('Rolling Tuscan roads', 900, 'power', 68),
+      iv('Gravel sector 1 — settling in', 300, 'power', 88),
+      iv('Recover on tarmac', 300, 'power', 65),
+      iv('Rolling tempo', 600, 'power', 75),
+      ...repeatIv(3, () => [iv('White-road gravel sector', 240, 'power', 92), iv('Steep gravel ramp', 45, 'power', 112), iv('Tarmac recovery', 360, 'power', 66)]),
+      iv('Attrition tempo — legs filling up', 900, 'power', 78),
+      iv('Gravel sector — Monte Sante Marie', 480, 'power', 90),
+      iv('Punchy gravel rise', 60, 'power', 110),
+      iv('Regroup and chase', 420, 'power', 82),
+      iv('Le Tolfe — steep white ramp', 90, 'power', 115),
+      iv('Run-in to Siena', 300, 'power', 88),
+      iv('Via Santa Caterina — the wall', 45, 'rpe', 10),
+      iv('Piazza del Campo sprint', 20, 'rpe', 10),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // Team Time Trial 4-Up (Rides · threshold) — a new interval SHAPE: pull hard
+  // just over threshold, then recover in the draft, repeated. TTT is a real
+  // discipline the library didn't represent.
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-team-time-trial', name: 'Team Time Trial — 4-Up', category: 'Rides',
+    description: 'The rotating paceline — a hard turn on the front just over threshold, then tuck in and recover in the draft, over and over, holding a relentless collective pace.',
+    repeatWholeCore: true,
+    intervals: [
+      iv('Warm up', 600, 'power', 60),
+      iv('Openers', 60, 'power', 105), iv('Settle', 120, 'power', 70),
+      iv('Roll out — build to pace', 180, 'power', 90),
+      ...repeatIv(10, () => [iv('On the front — pull', 45, 'power', 106), iv('In the draft — recover', 90, 'power', 78)]),
+      iv('Regroup at the turnaround', 240, 'power', 70),
+      ...repeatIv(10, () => [iv('On the front — pull', 45, 'power', 108), iv('In the draft — recover', 90, 'power', 80)]),
+      iv('Final flying kilometre', 120, 'power', 100),
+      iv('Line sprint', 20, 'rpe', 10),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // Bridge to the Break (Rides · vo2max) — a race narrative around repeated
+  // VO2 bridging efforts. Gives VO2 max a real-world race story rather than
+  // another clinical interval set.
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-bridge-to-break', name: 'Bridge to the Break', category: 'Rides',
+    description: 'The break keeps going up the road — each time you dig into the red to bridge across, sit in to catch your breath, then chase the next move that goes.',
+    intervals: [
+      iv('Warm up', 600, 'power', 58),
+      iv('Nervous bunch tempo', 480, 'power', 78),
+      iv('First attack goes — cover it', 120, 'power', 113),
+      iv('Sit in the group', 300, 'power', 72),
+      ...repeatIv(4, () => [iv('Bridge to the break', 180, 'power', 115), iv('Ease in the wheels', 240, 'power', 75)]),
+      iv('Break is caught — regroup', 360, 'power', 70),
+      iv('Counter-attack — dig deep', 150, 'power', 118),
+      iv('Chase group tempo', 420, 'power', 84),
+      ...repeatIv(3, () => [iv('Surge to hold the wheel', 120, 'power', 116), iv('Recover in the line', 180, 'power', 76)]),
+      iv('Final selection forms', 240, 'power', 95),
+      iv('Sprint for the line', 20, 'rpe', 10),
+      iv('Cool down', 540, 'power', 50),
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // Mallorca 312 (Rides · endurance) — a marquee bucket-list sportive. Long
+  // scenic coastal endurance, the iconic Sa Calobra switchbacks, then a long
+  // headwind drag home. Lots of variety inside one aspirational ride.
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-mallorca-312', name: 'Mallorca 312 — Sa Calobra & the Coast', category: 'Rides',
+    description: 'The legendary Mediterranean sportive — long scenic coastal miles, the iconic Sa Calobra switchback climb and descent, then a long flat drag home into the sea breeze.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      iv('Dawn rollout along the bay', 1200, 'power', 66),
+      iv('Coastal endurance', 1800, 'power', 70),
+      iv('Rolling headland', 900, 'power', 74),
+      iv('Sa Calobra — into the switchbacks', 600, 'power', 82),
+      ...repeatIv(4, () => [iv('Hairpin ramp', 90, 'power', 98), iv('Steady switchback', 210, 'power', 88)]),
+      iv('Sa Calobra upper slopes', 480, 'power', 90),
+      iv('Coll dels Reis — over the top', 60, 'power', 104),
+      iv('Long technical descent', 900, 'power', 55),
+      iv('Regroup — feed zone spin', 600, 'power', 64),
+      iv('Rolling inland tempo', 1200, 'power', 72),
+      iv('The long flat drag home — headwind', 1500, 'power', 76),
+      iv('Grinding into the breeze', 600, 'power', 74),
+      iv('Final run to the line', 300, 'power', 80),
+      iv('Cool down', 720, 'power', 50),
+    ],
+  },
 ];
 const CATEGORIES = ['All', 'Rides', 'Basics', 'Recovery', 'Endurance', 'Tempo', 'Sweet Spot', 'Threshold', 'VO2 Max', 'Anaerobic', 'FTP Test', 'Mixed'];
 

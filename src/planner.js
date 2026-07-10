@@ -128,6 +128,12 @@ export const WORKOUT_PURPOSE = {
   // --- New: recovery ride, and a longer VO2 grinder ---
   'ride-country-recovery': 'recovery',
   'ride-vo2-furnace': 'vo2max',
+  // --- New: round-number batch (1 Basics + 4 Rides) ---
+  'sprint-ladder': 'anaerobic',
+  'ride-strade-bianche': 'race',
+  'ride-team-time-trial': 'threshold',
+  'ride-bridge-to-break': 'vo2max',
+  'ride-mallorca-312': 'endurance',
 };
 
 // Human-readable labels for each purpose (used in the UI on day rows).
@@ -260,6 +266,12 @@ export const WORKOUT_TERRAIN = {
   'ride-valley-sweetspot': ['rolling', 'scenic'],
   'ride-country-recovery': ['scenic', 'flat'],
   'ride-vo2-furnace': ['punchy'],
+  // --- New round-number batch ---
+  'sprint-ladder': ['punchy'],
+  'ride-strade-bianche': ['gravel', 'steep', 'punchy'],
+  'ride-team-time-trial': ['flat', 'windy'],
+  'ride-bridge-to-break': ['rolling', 'punchy'],
+  'ride-mallorca-312': ['rolling', 'sustained-climb', 'windy', 'scenic'],
 };
 
 // Human-readable labels for each terrain tag (for any UI that surfaces them).
@@ -729,14 +741,17 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
     // (3) Past base phase, nudge toward the real-world Rides over Basics.
     if (pastBase && w.category === 'Rides') s += 3;
     // (4) Cross-week rotation: penalise recently-used workouts, most-recent
-    // hardest. `recent` is oldest-first, so a higher index = more recent = a
-    // bigger penalty. This is deliberately small (max ~ -16 for a full window)
-    // so it only ever breaks ties the other rules leave — it will never pull a
-    // terrain-fresh pick out from under a stale one, but it WILL rotate through
-    // workouts the other rules score equally (exactly the big same-terrain
-    // climbing/endurance pools that used to repeat).
+    // hardest, decaying to nothing for older picks. Sized so the most recent
+    // pick (penalty ~14) can overcome a single fresh-terrain tag (+10) — that's
+    // what lets a small pool actually rotate instead of the one richest-tagged
+    // workout winning every week forever (e.g. anaerobic, where Sprint Ladder
+    // was otherwise unreachable behind Lead-Out Day). It stays below TWO fresh
+    // tags (+20), so genuine within-week terrain variety still wins.
     const recIdx = recent.indexOf(w.id);
-    if (recIdx >= 0) s -= (recIdx + 1) * 2;
+    if (recIdx >= 0) {
+      const recency = recent.length - recIdx; // 1 = most recently used
+      s -= Math.max(0, 14 - (recency - 1) * 3);
+    }
     // (5) Duration fit for fixed-length quality sessions. Penalise workouts that
     // run past the comfortable session length (they'd be compressed) — half a
     // point per minute over, capped so it can override terrain/rotation and pull
