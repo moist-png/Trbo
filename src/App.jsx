@@ -163,6 +163,25 @@ function fmtLong(sec) {
   if (h > 0) return `${h}h ${m}m`;
   return `${m} min`;
 }
+// A single 0-ish..1.3 number for "how hard is the stimulus?", used only to sort
+// the library from recovery-easy up to sprint-savage. It's a duration-weighted
+// blend that leans on the harder intervals (the 4th-power weighting is the same
+// idea normalized power uses) so a workout with a few brutal efforts ranks above
+// a longer steady one, which matches how a rider would rank them by feel.
+function rpeToPct(rpe) {
+  const map = { 1: 40, 2: 48, 3: 55, 4: 62, 5: 70, 6: 78, 7: 88, 8: 96, 9: 108, 10: 130 };
+  return map[Math.round(rpe)] ?? 70;
+}
+function workoutIntensity(w) {
+  let dur = 0, np4 = 0;
+  for (const it of (w.intervals || [])) {
+    const pct = it.type === 'power' ? it.target : it.type === 'rpe' ? rpeToPct(it.target) : 60;
+    dur += it.duration;
+    np4 += Math.pow(pct / 100, 4) * it.duration;
+  }
+  if (!dur) return 0;
+  return Math.pow(np4 / dur, 0.25); // ~normalized intensity as a fraction of FTP
+}
 function formatTarget(it, ftp, mode) {
   if (it.type === 'free') return 'Free / rest';
   if (it.type === 'rpe') return `RPE ${it.target} / 10`;
@@ -1641,6 +1660,109 @@ const LIBRARY = [
       iv('Cool down', 720, 'power', 50),
     ],
   },
+  // ------------------------------------------------------------------------
+  // Short climbing rides — added so the plan builder can schedule a climbing
+  // day inside a normal 40–60 min session. Every other climbing ride is 2.5h+,
+  // which the time-budget check was rejecting for most riders.
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-lunch-climb', name: 'Lunchtime Climb', category: 'Rides',
+    description: 'One clean climb done over lunch — a short valley run-in, then a steady sustained effort to the top and straight back down.',
+    intervals: [
+      iv('Warm up', 300, 'power', 55),
+      iv('Valley approach', 240, 'power', 68),
+      iv('Lower slopes', 300, 'power', 80),
+      iv('Steady climb', 600, 'power', 88),
+      iv('Gradient steepens', 300, 'power', 93),
+      iv('Final push to the top', 180, 'power', 98),
+      iv('Descent', 240, 'power', 55),
+      iv('Cool down', 180, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-hill-repeats', name: 'Hill Repeats', category: 'Rides',
+    description: 'The same short, steep pitch five times over — punch up out of every hairpin, roll back down, go again.',
+    repeatWholeCore: true,
+    intervals: [
+      iv('Warm up', 360, 'power', 55),
+      iv('Spin to the base', 180, 'power', 65),
+      ...repeatIv(5, () => [iv('Steep repeat', 240, 'power', 95), iv('Roll back down', 120, 'power', 55)]),
+      iv('Cool down', 300, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-punchy-climb-express', name: 'Rolling Climb Express', category: 'Rides',
+    description: 'Three climbs linked by quick descents in under an hour — sustained climbing legs without the all-day epic.',
+    intervals: [
+      iv('Warm up', 360, 'power', 55),
+      iv('Rolling approach', 300, 'power', 70),
+      iv('Climb one', 480, 'power', 88),
+      iv('Roll down', 180, 'power', 60),
+      iv('Climb two', 480, 'power', 90),
+      iv('Roll down', 180, 'power', 60),
+      iv('Final climb', 420, 'power', 92),
+      iv('Summit surge', 60, 'power', 105),
+      iv('Descent', 240, 'power', 55),
+      iv('Cool down', 240, 'power', 50),
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // Real-world tempo ride — the tempo purpose previously had no "Ride", so a
+  // plan could never graduate its sweet-spot day from the plain Basics into a
+  // narrative route the way build/peak phases intend.
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-valley-sweetspot', name: 'Valley Sweet Spot Roll', category: 'Rides',
+    description: 'Rolling valley roads with three sweet spot blocks stitched between the scenic cruising — the workhorse tempo session with a view.',
+    intervals: [
+      iv('Warm up', 420, 'power', 58),
+      iv('Rolling spin', 300, 'power', 68),
+      iv('Sweet spot block', 600, 'power', 88),
+      iv('Valley recover', 240, 'power', 65),
+      iv('Sweet spot block', 600, 'power', 90),
+      iv('Scenic roll', 300, 'power', 70),
+      iv('Sweet spot block', 480, 'power', 89),
+      iv('Cruise home', 420, 'power', 66),
+      iv('Cool down', 300, 'power', 50),
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // Recovery ride — rounds out a thin corner (only two recovery options).
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-country-recovery', name: 'Country Lanes Recovery', category: 'Rides',
+    description: 'A soft-pedal spin down quiet country lanes — nothing but easy gears to flush the legs the day after something hard.',
+    intervals: [
+      iv('Easy spin', 300, 'power', 50),
+      iv('Gentle lanes', 600, 'power', 58),
+      iv('Soft pedal', 300, 'power', 54),
+      iv('Gentle lanes', 480, 'power', 60),
+      iv('Easy spin home', 300, 'power', 52),
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // The 40/20 Furnace — the 40/20 × 13 × 2 core (as in the Basics double) but
+  // expanded into a full VO2 session: a threshold block to pre-fatigue the
+  // legs before the first set, and a sustained VO2 finisher to empty the tank
+  // after the second. Gives the vo2max purpose a longer, Ride-flavoured option.
+  // ------------------------------------------------------------------------
+  {
+    id: 'ride-vo2-furnace', name: 'The 40/20 Furnace', category: 'Rides',
+    description: 'Two full sets of 40/20s with a threshold block softening you up beforehand and a sustained VO2 finisher waiting on the far side. Bring a towel.',
+    intervals: [
+      iv('Warm up', 600, 'power', 55),
+      ...repeatIv(3, () => [iv('Opener', 30, 'power', 110), iv('Easy', 60, 'power', 50)]),
+      iv('Threshold pre-load', 480, 'power', 98),
+      iv('Recovery', 180, 'power', 55),
+      ...repeatIv(13, () => [iv('On', 40, 'power', 120), iv('Off', 20, 'power', 50)]),
+      iv('Between sets recovery', 300, 'power', 55),
+      ...repeatIv(13, () => [iv('On', 40, 'power', 120), iv('Off', 20, 'power', 50)]),
+      iv('Recovery', 180, 'power', 55),
+      iv('Sustained VO2 finisher — empty the tank', 300, 'power', 115),
+      iv('Last gasp sprint', 30, 'rpe', 10),
+      iv('Cool down', 600, 'power', 50),
+    ],
+  },
 ];
 const CATEGORIES = ['All', 'Rides', 'Basics', 'Recovery', 'Endurance', 'Tempo', 'Sweet Spot', 'Threshold', 'VO2 Max', 'Anaerobic', 'FTP Test', 'Mixed'];
 
@@ -2660,15 +2782,32 @@ function FtpView({ ftp, setFtp, ftpHistory, onClearFtpHistory, onOpenWorkout }) 
 }
 
 // ---------- library view ----------
+const LIBRARY_SORTS = [
+  { key: 'default', label: 'Default' },
+  { key: 'short', label: 'Shortest' },
+  { key: 'long', label: 'Longest' },
+  { key: 'easy', label: 'Easiest' },
+  { key: 'hard', label: 'Hardest' },
+];
 function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle }) {
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState(lockedCategory || 'All');
+  const [sort, setSort] = useState('default');
   const all = useMemo(() => {
     const withFlag = LIBRARY.map(w => ({ ...w, custom: false })).concat(customWorkouts.map(w => ({ ...w, custom: true })));
     const activeCat = lockedCategory || cat;
-    return withFlag.filter(w => (activeCat === 'All' || activeCat === 'Custom' ? true : w.category === activeCat) && (activeCat !== 'Custom' || w.custom))
+    const list = withFlag.filter(w => (activeCat === 'All' || activeCat === 'Custom' ? true : w.category === activeCat) && (activeCat !== 'Custom' || w.custom))
       .filter(w => w.name.toLowerCase().includes(query.toLowerCase()));
-  }, [query, cat, customWorkouts, lockedCategory]);
+    if (sort === 'default') return list;
+    const withMeta = list.map(w => ({ w, dur: totalDuration(w.intervals), intensity: workoutIntensity(w) }));
+    const cmp = {
+      short: (a, b) => a.dur - b.dur,
+      long: (a, b) => b.dur - a.dur,
+      easy: (a, b) => a.intensity - b.intensity,
+      hard: (a, b) => b.intensity - a.intensity,
+    }[sort];
+    return withMeta.sort(cmp).map(m => m.w);
+  }, [query, cat, customWorkouts, lockedCategory, sort]);
 
   return (
     <div style={{ padding: '16px 16px 80px' }}>
@@ -2680,10 +2819,14 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle }
           style={{ background: 'none', border: 'none', outline: 'none', color: TEXT, fontSize: 14, flex: 1 }} />
       </div>
       {!lockedCategory && (
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
           {CATEGORIES.concat('Custom').map(c => <Chip key={c} active={cat === c} onClick={() => setCat(c)}>{c}</Chip>)}
         </div>
       )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
+        <span style={{ fontSize: 11, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', flexShrink: 0 }}>Sort</span>
+        {LIBRARY_SORTS.map(s => <Chip key={s.key} active={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</Chip>)}
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {all.map(w => {
           const total = totalDuration(w.intervals);

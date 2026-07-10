@@ -119,6 +119,15 @@ export const WORKOUT_PURPOSE = {
   'ride-liege-bastogne-liege': 'climbing',
   'ride-milan-san-remo': 'endurance',
   'ride-vuelta-angliru': 'climbing',
+  // --- New: short climbing rides (unlock climbing for normal time budgets) ---
+  'ride-lunch-climb': 'climbing',
+  'ride-hill-repeats': 'climbing',
+  'ride-punchy-climb-express': 'climbing',
+  // --- New: real-world tempo ride (tempo previously had no Rides option) ---
+  'ride-valley-sweetspot': 'tempo',
+  // --- New: recovery ride, and a longer VO2 grinder ---
+  'ride-country-recovery': 'recovery',
+  'ride-vo2-furnace': 'vo2max',
 };
 
 // Human-readable labels for each purpose (used in the UI on day rows).
@@ -162,6 +171,14 @@ export const PURPOSE_LABEL = {
 //   windy       — crosswinds, echelons, headwind fights
 //   mixed       — a varied narrative route touching several of the above
 //   scenic      — easy-going / social character (café pace, recovery)
+//   hairpins    — switchback climbing: repeated surge-out-of-the-corner efforts
+//   multi-climb — several distinct climbs linked by descents (not one long ascent)
+//
+// NOTE: 'hairpins' and 'multi-climb' were added purely to give the freshness
+// picker a way to tell the big climbing rides apart (previously ~13 of them
+// shared the exact same tag set and were interchangeable to the generator).
+// They are ADDITIVE: existing tags on every workout are left in place, these
+// are only appended where they genuinely apply.
 // ---------------------------------------------------------------------------
 export const WORKOUT_TERRAIN = {
   // --- Basics (indoor structure; terrain is abstract but still varies) ---
@@ -184,7 +201,7 @@ export const WORKOUT_TERRAIN = {
   'ride-chaingang': ['flat', 'windy'],
   'ride-century-sim': ['mixed', 'flat', 'sustained-climb'],
   'ride-coastal-rollers': ['rolling', 'windy', 'punchy'],
-  'ride-alpine-ascent': ['sustained-climb'],
+  'ride-alpine-ascent': ['sustained-climb', 'hairpins'],
   'ride-gravel-grinder': ['gravel', 'punchy', 'rolling'],
   'ride-crosswind-echelon': ['windy', 'flat'],
   'ride-breakaway-glory': ['mixed', 'punchy'],
@@ -201,20 +218,20 @@ export const WORKOUT_TERRAIN = {
   'ride-breakaway-stage': ['mixed', 'windy', 'punchy'],
   'ride-monument-classics': ['cobbles', 'steep'],
   'ride-bikepacking-haul': ['gravel', 'flat', 'scenic'],
-  'ride-mountain-double': ['sustained-climb'],
+  'ride-mountain-double': ['sustained-climb', 'multi-climb'],
   'ride-urban-commute': ['punchy', 'flat'],
   'ride-recovery-cruise': ['scenic', 'flat'],
   'ride-leadout-day': ['punchy', 'flat'],
   'ride-ridge-traverse': ['rolling', 'windy', 'punchy'],
   'ride-volcano-rim': ['sustained-climb', 'steep'],
   'ride-desert-crossing': ['flat', 'windy'],
-  'ride-fjord-switchbacks': ['steep', 'sustained-climb'],
+  'ride-fjord-switchbacks': ['steep', 'sustained-climb', 'hairpins'],
   'ride-highland-loop': ['rolling', 'windy', 'sustained-climb'],
-  'ride-dolomites-double': ['sustained-climb', 'steep'],
+  'ride-dolomites-double': ['sustained-climb', 'steep', 'multi-climb'],
   'ride-wine-country': ['rolling'],
   'ride-moorland-crossing': ['windy', 'gravel', 'flat'],
   'ride-canyon-rim': ['steep', 'punchy'],
-  'ride-alpine-col-chain': ['sustained-climb'],
+  'ride-alpine-col-chain': ['sustained-climb', 'multi-climb'],
   'ride-anti-gravity': ['sustained-climb', 'steep'],
   'ride-storm-chase': ['windy', 'punchy'],
   'ride-tt-through-time': ['flat', 'sustained-climb'],
@@ -223,18 +240,26 @@ export const WORKOUT_TERRAIN = {
   'ride-ironman-nice': ['flat', 'sustained-climb'],
   'ride-ironman-kona': ['flat', 'windy'],
   'ride-ironman-lanzarote': ['windy', 'steep', 'sustained-climb'],
-  'ride-pyrenees-circle-of-death': ['sustained-climb'],
-  'ride-giro-stelvio': ['sustained-climb'],
+  'ride-pyrenees-circle-of-death': ['sustained-climb', 'multi-climb'],
+  'ride-giro-stelvio': ['sustained-climb', 'hairpins'],
   'ride-giro-zoncolan': ['steep'],
   'ride-giro-finestre': ['sustained-climb', 'gravel', 'steep'],
   'ride-tour-ventoux': ['sustained-climb', 'windy'],
-  'ride-tour-alpe-dhuez': ['sustained-climb'],
+  'ride-tour-alpe-dhuez': ['sustained-climb', 'hairpins'],
   'ride-tour-galibier': ['sustained-climb'],
   'ride-paris-roubaix': ['cobbles', 'flat'],
   'ride-tour-of-flanders': ['cobbles', 'steep'],
   'ride-liege-bastogne-liege': ['rolling', 'sustained-climb'],
   'ride-milan-san-remo': ['flat', 'punchy'],
   'ride-vuelta-angliru': ['steep', 'sustained-climb'],
+  // --- New short climbing rides ---
+  'ride-lunch-climb': ['sustained-climb'],
+  'ride-hill-repeats': ['steep', 'hairpins'],
+  'ride-punchy-climb-express': ['rolling', 'sustained-climb'],
+  // --- New tempo / recovery / VO2 rides ---
+  'ride-valley-sweetspot': ['rolling', 'scenic'],
+  'ride-country-recovery': ['scenic', 'flat'],
+  'ride-vo2-furnace': ['punchy'],
 };
 
 // Human-readable labels for each terrain tag (for any UI that surfaces them).
@@ -242,11 +267,18 @@ export const TERRAIN_LABEL = {
   flat: 'Flat', rolling: 'Rolling', 'sustained-climb': 'Sustained climb',
   steep: 'Steep', punchy: 'Punchy', cobbles: 'Cobbles', gravel: 'Gravel',
   windy: 'Windy', mixed: 'Mixed', scenic: 'Scenic',
+  hairpins: 'Hairpins', 'multi-climb': 'Multi-climb',
 };
 
 // Which purposes count as "high stress" for the hard/easy spacing rule.
 const HIGH_STRESS = new Set(['threshold', 'vo2max', 'anaerobic', 'race']);
 export function isHighStress(purpose) { return HIGH_STRESS.has(purpose); }
+
+// Purposes whose duration we freely scale after picking (see enforceTimeBudget
+// and the scaling pass in the generator). Because these get resized to fit the
+// week anyway, the picker's duration-fit term (rule 5) should NOT apply to them
+// — only to the fixed-length quality sessions we keep at native length.
+const FIXED_LENGTH_EXEMPT = new Set(['endurance', 'recovery', 'tempo']);
 
 // ---------------------------------------------------------------------------
 // 2. Estimated TSS from a workout's planned intervals
@@ -517,18 +549,31 @@ export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSp
   // squeezed in after the fact.
   const FLEXIBLE = new Set(['endurance', 'recovery', 'tempo']);
   const MIN_FLEX_RESERVE = 2700; // keep the flexible anchor ride at least ~45 min
-  const avgDurationCache = {};
-  function avgNativeDuration(purpose) {
-    if (avgDurationCache[purpose] != null) return avgDurationCache[purpose];
-    if (!library) return (avgDurationCache[purpose] = 3600);
-    const cands = library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
-    const dur = cands.length
-      ? cands.reduce((a, w) => a + w.intervals.reduce((x, y) => x + y.duration, 0), 0) / cands.length
-      : 3600;
-    return (avgDurationCache[purpose] = dur);
+  const days = Math.max(1, daysPerWeek);
+  // The time a single session realistically has. The picker treats 1.5x this as
+  // the "comfortable" ceiling (easy days shrink to free up room for a quality
+  // day), so we size feasibility the same way here.
+  const comfortableSession = weeklySecondsBudget ? (weeklySecondsBudget / days) * 1.5 : Infinity;
+  const durCache = {};
+  // The duration the picker will most likely commit for this purpose given the
+  // rider's session budget: the LONGEST workout that still fits comfortably, or
+  // — if none fit — the SHORTEST available (so a purpose with only long options,
+  // like climbing before the short rides existed, is judged by its shortest ride
+  // rather than its average, and a short climb can still earn a slot on a tight
+  // week instead of the whole purpose being dropped).
+  function representativeDuration(purpose) {
+    if (durCache[purpose] != null) return durCache[purpose];
+    if (!library) return (durCache[purpose] = 3600);
+    const durs = library
+      .filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test')
+      .map(w => w.intervals.reduce((x, y) => x + y.duration, 0));
+    if (!durs.length) return (durCache[purpose] = 3600);
+    const fitting = durs.filter(d => d <= comfortableSession);
+    const val = fitting.length ? Math.max(...fitting) : Math.min(...durs);
+    return (durCache[purpose] = val);
   }
 
-  const days = Math.max(1, daysPerWeek);
+
   // Multi-sport riders get one fewer hard day (extra recovery headroom).
   const maxHardDays = Math.max(1, Math.floor(days * (multiSport ? 0.35 : 0.5)));
   const availableForFixed = weeklySecondsBudget ? Math.max(0, weeklySecondsBudget - MIN_FLEX_RESERVE) : Infinity;
@@ -548,7 +593,7 @@ export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSp
       const isFixedLength = !FLEXIBLE.has(candidate);
       const wouldBeBackToBack = isHighStress(candidate) && isHighStress(prev);
       const overHardBudget = isHighStress(candidate) && hardCount >= maxHardDays;
-      const overTimeBudget = isFixedLength && (fixedSecondsCommitted + avgNativeDuration(candidate) > availableForFixed);
+      const overTimeBudget = isFixedLength && (fixedSecondsCommitted + representativeDuration(candidate) > availableForFixed);
       if (wouldBeBackToBack || overHardBudget || overTimeBudget) continue;
       current[candidate] -= totalWeight;
       return candidate;
@@ -563,7 +608,7 @@ export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSp
     const candidate = pickNext(prev);
     slots.push(candidate);
     if (isHighStress(candidate)) hardCount++;
-    if (!FLEXIBLE.has(candidate)) fixedSecondsCommitted += avgNativeDuration(candidate);
+    if (!FLEXIBLE.has(candidate)) fixedSecondsCommitted += representativeDuration(candidate);
   }
   return slots;
 }
@@ -626,9 +671,24 @@ export function maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, reco
 //   3. Once past base phase, prefer the real-world "Rides" over the plainer
 //      "Basics" where both share the purpose, so named routes (Alpe d'Huez,
 //      Roubaix, etc.) come into play as the plan gets specific.
-// `usedTerrainThisWeek` (a Set) and `phase` are optional; when omitted the
-// function still works and just falls back to id-novelty like before.
-export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTerrainThisWeek, phase) {
+//   4. Rotate across WEEKS. Previously ties (very common inside the big
+//      climbing/endurance pools, where many rides share a purpose AND terrain)
+//      broke by library order every single week — so the same one workout got
+//      picked over and over and 18 of 20 rides never appeared. `recentByPurpose`
+//      is a small sliding window of recently-used ids per purpose; the more
+//      recently a workout was used, the larger its penalty, so the picker walks
+//      through the whole pool before coming back round.
+//   5. Fit the rider's session length. For fixed-length quality sessions
+//      (climbing, race, etc. — the ones we DON'T scale afterwards), prefer a
+//      workout that actually fits the time a session realistically has, rather
+//      than picking a 2.5h mountain epic and then crushing it down to fit. This
+//      is what lets the new short climbs get chosen for a rider training in ~1h
+//      sessions, while riders with big time budgets still get the full epics.
+// `usedTerrainThisWeek` (a Set), `phase`, `recentByPurpose`, and
+// `sessionSecondsHint` (the rough seconds a single session has) are all
+// optional; when omitted the function still works and falls back to prior
+// behaviour.
+export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTerrainThisWeek, phase, recentByPurpose, sessionSecondsHint) {
   let candidates = library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
   if (!candidates.length) {
     // Fallback chain so a slot is never empty.
@@ -651,6 +711,13 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
   // which keeps output stable and deterministic.
   const usedTerrain = usedTerrainThisWeek || new Set();
   const pastBase = phase && phase !== 'base';
+  const recent = (recentByPurpose && recentByPurpose[purpose]) || [];
+  // A single quality session can fairly run a bit longer than the flat weekly
+  // average, because the flexible easy days shrink to make room. 1.5x the
+  // average slot is the "comfortable" ceiling before a workout would have to be
+  // compressed to fit. Only applied to purposes we keep at native length.
+  const durationAware = sessionSecondsHint && !FIXED_LENGTH_EXEMPT.has(purpose);
+  const comfortableSeconds = durationAware ? sessionSecondsHint * 1.5 : 0;
   function score(w) {
     let s = 0;
     // (1) Strongly avoid repeating an exact workout this week.
@@ -661,6 +728,25 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
     s += freshTags * 10;
     // (3) Past base phase, nudge toward the real-world Rides over Basics.
     if (pastBase && w.category === 'Rides') s += 3;
+    // (4) Cross-week rotation: penalise recently-used workouts, most-recent
+    // hardest. `recent` is oldest-first, so a higher index = more recent = a
+    // bigger penalty. This is deliberately small (max ~ -16 for a full window)
+    // so it only ever breaks ties the other rules leave — it will never pull a
+    // terrain-fresh pick out from under a stale one, but it WILL rotate through
+    // workouts the other rules score equally (exactly the big same-terrain
+    // climbing/endurance pools that used to repeat).
+    const recIdx = recent.indexOf(w.id);
+    if (recIdx >= 0) s -= (recIdx + 1) * 2;
+    // (5) Duration fit for fixed-length quality sessions. Penalise workouts that
+    // run past the comfortable session length (they'd be compressed) — half a
+    // point per minute over, capped so it can override terrain/rotation and pull
+    // in a genuinely short climb, but never so hard it breaks the pool for a
+    // rider whose whole library of that purpose is long.
+    if (durationAware) {
+      const native = w.intervals.reduce((a, b) => a + b.duration, 0);
+      const overMinutes = (native - comfortableSeconds) / 60;
+      if (overMinutes > 0) s -= Math.min(45, overMinutes * 0.5);
+    }
     return s;
   }
 
@@ -677,6 +763,21 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
 // set (small helper so both the generator and the rebuild path stay in sync).
 export function markTerrainUsed(usedTerrainThisWeek, workoutId) {
   (WORKOUT_TERRAIN[workoutId] || []).forEach(t => usedTerrainThisWeek.add(t));
+}
+
+// Record a chosen workout into the cross-week rotation memory for its purpose.
+// `recentByPurpose` maps purpose -> array of recently used ids, OLDEST FIRST.
+// We keep a sliding window (last WINDOW picks) so the penalty in the scorer
+// always leaves at least a few options unpenalised even in small pools.
+const ROTATION_WINDOW = 8;
+export function markRecentlyUsed(recentByPurpose, purpose, workoutId) {
+  if (!recentByPurpose) return;
+  const list = recentByPurpose[purpose] || (recentByPurpose[purpose] = []);
+  // If it was already in the window, drop the old entry so it moves to newest.
+  const existing = list.indexOf(workoutId);
+  if (existing >= 0) list.splice(existing, 1);
+  list.push(workoutId);
+  while (list.length > ROTATION_WINDOW) list.shift();
 }
 
 // List all valid swap options for a slot: same-purpose workouts from the
@@ -767,6 +868,13 @@ export function generatePlan({
   const feasibleDays = Math.max(1, Math.min(daysPerWeek, Math.floor(weeklySecondsBudget / MIN_RIDE_SECONDS)));
   const effectiveDays = feasibleDays;
 
+  // Cross-week rotation memory: persists across the whole plan so the picker
+  // walks through each purpose's pool instead of repeating week 1's choice.
+  const recentByPurpose = {};
+  // Rough time a single session has, so the picker can prefer workouts that fit
+  // rather than long ones that get compressed.
+  const sessionSecondsHint = weeklySecondsBudget / Math.max(1, effectiveDays);
+
   const weeks = phaseByWeek.map((phase, wi) => {
     const isRecovery = recoveryFlags[wi];
     let purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, library, weeklySecondsBudget });
@@ -777,9 +885,10 @@ export function generatePlan({
 
     // First pass: pick a workout per slot at its native length.
     const rawDays = purposeSlots.map(purpose => {
-      const w = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, phase);
+      const w = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, phase, recentByPurpose, sessionSecondsHint);
       usedIds.add(w.id);
       markTerrainUsed(usedTerrain, w.id);
+      markRecentlyUsed(recentByPurpose, purpose, w.id);
       const nativeSeconds = w.intervals.reduce((a, b) => a + b.duration, 0);
       const nativeTss = estimateWorkoutTss(w.intervals);
       return { purpose, workoutId: w.id, name: w.name, nativeSeconds, nativeTss, fixedLength: !!w.fixedLength };
@@ -990,16 +1099,26 @@ export function rebuildWeekWorkouts(plan, library, fromWeek) {
   const phaseByWeek = plan.weeks.map(w => w.phase);
   const recoveryFlags = plan.weeks.map(w => w.isRecovery);
 
+  // Rebuild only re-picks weeks from `fromWeek` on. Seed the rotation memory by
+  // walking the untouched earlier weeks first, so the rebuilt weeks continue the
+  // rotation rather than resetting it to week 1's choices.
+  const recentByPurpose = {};
+  const sessionSecondsHint = weeklySecondsBudget / Math.max(1, plan.daysPerWeek);
+
   const weeks = plan.weeks.map((w, wi) => {
-    if (w.weekNumber < fromWeek) return w;
+    if (w.weekNumber < fromWeek) {
+      (w.days || []).forEach(d => { if (d.purpose && d.workoutId) markRecentlyUsed(recentByPurpose, d.purpose, d.workoutId); });
+      return w;
+    }
     let purposeSlots = weekPurposeSlots({ phase: w.phase, daysPerWeek: plan.daysPerWeek, goal, isRecovery: w.isRecovery, multiSport: plan.multiSport, library, weeklySecondsBudget });
     purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     const usedIds = new Set();
     const usedTerrain = new Set();
     const rawDays = purposeSlots.map(purpose => {
-      const wk = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, w.phase);
+      const wk = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, w.phase, recentByPurpose, sessionSecondsHint);
       usedIds.add(wk.id);
       markTerrainUsed(usedTerrain, wk.id);
+      markRecentlyUsed(recentByPurpose, purpose, wk.id);
       const nativeSeconds = wk.intervals.reduce((a, b) => a + b.duration, 0);
       const nativeTss = estimateWorkoutTss(wk.intervals);
       return { purpose, workoutId: wk.id, name: wk.name, nativeSeconds, nativeTss, fixedLength: !!wk.fixedLength };
