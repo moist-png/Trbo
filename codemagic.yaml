@@ -1,0 +1,65 @@
+workflows:
+  trbo-ios:
+    name: Trbo iOS (TestFlight)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: trbo-appstore
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.trbo.trainer
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+      node: 22
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: npm ci
+      - name: Build web app
+        script: npm run build
+      - name: Capacitor sync (copy web build + plugins into iOS project)
+        script: npx cap sync ios
+      - name: Set up iOS code signing
+        script: xcode-project use-profiles
+      - name: Bump build number
+        script: |
+          cd ios/App
+          LATEST=$(app-store-connect get-latest-build-number "$BUNDLE_ID" || echo 0)
+          agvtool new-version -all $(($LATEST + 1))
+      - name: Build .ipa
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Set to true once you want internal testers auto-notified on each build.
+        beta_groups: []
+
+# ---------------------------------------------------------------------------
+# One-time setup (Hubert, in the Codemagic web dashboard — no code involved):
+#
+# 1. Sign up at codemagic.io and connect the moist-png/Trbo GitHub repo.
+# 2. In App Store Connect (once your Apple Developer account is approved),
+#    create a new app with bundle ID: app.trbo.trainer
+# 3. In App Store Connect, generate an API key (Users and Access > Keys).
+# 4. In Codemagic > Team settings > Integrations > App Store Connect, add
+#    that key as an integration named exactly: trbo-appstore
+#    (or edit the name above under `integrations:` to match what you chose).
+# 5. Push to main (or click "Start new build" in Codemagic) — it builds the
+#    iOS app and uploads it straight to TestFlight automatically.
+# 6. Install the TestFlight app on your iPhone, accept the email invite that
+#    App Store Connect sends once the build finishes processing, and install.
+# ---------------------------------------------------------------------------

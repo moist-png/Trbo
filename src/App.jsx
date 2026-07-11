@@ -9,6 +9,9 @@ import {
 import { supabase } from './supabaseClient';
 import PlannerView from './PlannerView';
 import { MiniGamesView, MiniGamePlayer } from './MiniGames';
+import {
+  isNative, nativeRequestAndConnect, nativeStartNotifications, nativeWrite, nativeDisconnect, uuid16,
+} from './nativeBle';
 
 // ---------- palette ----------
 // TEXT/SUB/PANEL/PANEL2/LINE/RED/BG/MUTED resolve through CSS custom
@@ -1925,11 +1928,11 @@ function useTrainer() {
   const [hasControl, setHasControl] = useState(false);
   const deviceRef = useRef(null);
   const controlRef = useRef(null);
-  const supported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
+  const nativeIdRef = useRef(null);
+  const supported = isNative || (typeof navigator !== 'undefined' && !!navigator.bluetooth);
 
-  function handleBikeData(event) {
+  function handleBikeData(dv) {
     try {
-      const dv = event.target.value;
       const flags = dv.getUint16(0, true);
       let offset = 2;
       let cad = null, pow = null;
@@ -1953,6 +1956,27 @@ function useTrainer() {
   async function connect() {
     if (!supported) { setErrorMsg('Bluetooth is not available in this browser or environment.'); setStatus('error'); return; }
     setStatus('connecting'); setErrorMsg(null);
+    if (isNative) {
+      try {
+        const svc = uuid16(0x1826);
+        const { deviceId, name } = await nativeRequestAndConnect(svc, handleDisconnected);
+        nativeIdRef.current = deviceId;
+        try {
+          await nativeStartNotifications(deviceId, svc, uuid16(0x2ad2), handleBikeData);
+        } catch (e) {}
+        try {
+          await nativeWrite(deviceId, svc, uuid16(0x2ad9), new Uint8Array([0x00]));
+          controlRef.current = { native: true };
+          setHasControl(true);
+        } catch (e) { controlRef.current = null; setHasControl(false); }
+        setDeviceName(name || 'Trainer');
+        setStatus('connected');
+      } catch (e) {
+        setErrorMsg((e && e.message) ? e.message : 'Could not connect to a trainer.');
+        setStatus('error');
+      }
+      return;
+    }
     try {
       const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [0x1826] }], optionalServices: [0x1826] });
       device.addEventListener('gattserverdisconnected', handleDisconnected);
@@ -1961,7 +1985,7 @@ function useTrainer() {
       try {
         const bikeChar = await service.getCharacteristic(0x2ad2);
         await bikeChar.startNotifications();
-        bikeChar.addEventListener('characteristicvaluechanged', handleBikeData);
+        bikeChar.addEventListener('characteristicvaluechanged', (event) => handleBikeData(event.target.value));
       } catch (e) {}
       try {
         const controlChar = await service.getCharacteristic(0x2ad9);
@@ -1978,17 +2002,29 @@ function useTrainer() {
     }
   }
   function disconnect() {
-    try { deviceRef.current && deviceRef.current.gatt && deviceRef.current.gatt.disconnect(); } catch (e) {}
+    if (isNative) {
+      nativeDisconnect(nativeIdRef.current);
+      nativeIdRef.current = null;
+    } else {
+      try { deviceRef.current && deviceRef.current.gatt && deviceRef.current.gatt.disconnect(); } catch (e) {}
+    }
     setStatus('disconnected'); setDeviceName(null); setPower(null); setCadence(null); setHasControl(false);
   }
-  async function setErgTarget(watts) {
+  async function writeControl(buf) {
     if (!controlRef.current) return;
+    if (controlRef.current.native) {
+      await nativeWrite(nativeIdRef.current, uuid16(0x1826), uuid16(0x2ad9), buf);
+    } else {
+      await controlRef.current.writeValue(buf);
+    }
+  }
+  async function setErgTarget(watts) {
     try {
       const buf = new ArrayBuffer(3);
       const dv = new DataView(buf);
       dv.setUint8(0, 0x05);
       dv.setInt16(1, Math.round(watts), true);
-      await controlRef.current.writeValue(buf);
+      await writeControl(buf);
     } catch (e) {}
   }
   // Leave ERG/target-power mode and hand power control back to the rider by
@@ -1996,10 +2032,9 @@ function useTrainer() {
   // Used by the mini games so that after a fixed-power game like Beat the
   // Pros the trainer isn't left holding a target the rider can't vary.
   async function endErg() {
-    if (!controlRef.current) return;
     try {
       // FTMS Set Indoor Bike Simulation Parameters (0x11), all values zero.
-      await controlRef.current.writeValue(new Uint8Array([0x11, 0, 0, 0, 0, 0, 0]));
+      await writeControl(new Uint8Array([0x11, 0, 0, 0, 0, 0, 0]));
     } catch (e) {}
   }
   return { supported, status, deviceName, errorMsg, power, cadence, hasControl, connect, disconnect, setErgTarget, endErg };
@@ -2014,11 +2049,11 @@ function useHeartRate() {
   const [errorMsg, setErrorMsg] = useState(null);
   const [bpm, setBpm] = useState(null);
   const deviceRef = useRef(null);
-  const supported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
+  const nativeIdRef = useRef(null);
+  const supported = isNative || (typeof navigator !== 'undefined' && !!navigator.bluetooth);
 
-  function handleHrData(event) {
+  function handleHrData(dv) {
     try {
-      const dv = event.target.value;
       const flags = dv.getUint8(0);
       const value = (flags & 0x01) ? dv.getUint16(1, true) : dv.getUint8(1);
       setBpm(value);
@@ -2031,6 +2066,20 @@ function useHeartRate() {
   async function connect() {
     if (!supported) { setErrorMsg('Bluetooth is not available in this browser or environment.'); setStatus('error'); return; }
     setStatus('connecting'); setErrorMsg(null);
+    if (isNative) {
+      try {
+        const svc = uuid16(0x180d);
+        const { deviceId, name } = await nativeRequestAndConnect(svc, handleDisconnected);
+        nativeIdRef.current = deviceId;
+        await nativeStartNotifications(deviceId, svc, uuid16(0x2a37), handleHrData);
+        setDeviceName(name || 'Heart rate monitor');
+        setStatus('connected');
+      } catch (e) {
+        setErrorMsg((e && e.message) ? e.message : 'Could not connect to a heart rate monitor.');
+        setStatus('error');
+      }
+      return;
+    }
     try {
       const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [0x180d] }], optionalServices: [0x180d] });
       device.addEventListener('gattserverdisconnected', handleDisconnected);
@@ -2038,7 +2087,7 @@ function useHeartRate() {
       const service = await server.getPrimaryService(0x180d);
       const hrChar = await service.getCharacteristic(0x2a37);
       await hrChar.startNotifications();
-      hrChar.addEventListener('characteristicvaluechanged', handleHrData);
+      hrChar.addEventListener('characteristicvaluechanged', (event) => handleHrData(event.target.value));
       deviceRef.current = device;
       setDeviceName(device.name || 'Heart rate monitor');
       setStatus('connected');
@@ -2048,7 +2097,12 @@ function useHeartRate() {
     }
   }
   function disconnect() {
-    try { deviceRef.current && deviceRef.current.gatt && deviceRef.current.gatt.disconnect(); } catch (e) {}
+    if (isNative) {
+      nativeDisconnect(nativeIdRef.current);
+      nativeIdRef.current = null;
+    } else {
+      try { deviceRef.current && deviceRef.current.gatt && deviceRef.current.gatt.disconnect(); } catch (e) {}
+    }
     setStatus('disconnected'); setDeviceName(null); setBpm(null);
   }
   return { supported, status, deviceName, errorMsg, bpm, connect, disconnect };
