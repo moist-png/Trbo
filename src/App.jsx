@@ -100,8 +100,13 @@ const DEFAULT_SETTINGS = {
 // real card. To take real payments you'd add Stripe (or Apple/Google
 // in-app purchase if you distribute through their app stores).
 const TRIAL_DAYS = 7;
-const MONTHLY_PRICE_LABEL = '$7.99 / month'; // placeholder — set your real price
-const ANNUAL_PRICE_LABEL = '$79.99 / year'; // keep in sync with ANNUAL_PRICE_CENTS in api/create-checkout-session.js
+const MONTHLY_PRICE_LABEL = '$5.99 / month';
+const ANNUAL_PRICE_LABEL = '$65.89 / year'; // keep in sync with ANNUAL_PRICE_CENTS in api/create-checkout-session.js
+// New account creation is paused app-wide until Trbo formally relaunches (marketing
+// funnel, native testing, and the EU/UK Article 27 representative decision all need
+// to land together — see /pricing page and TRBO_MINIMAL_PAGE_HANDOVER.md). Existing
+// accounts are completely unaffected by this flag; it only blocks new signups.
+const SIGNUPS_PAUSED = true;
 // How many devices one account can be actively signed in on at once. Backed
 // by the register_device/check_device functions in supabase-setup.sql —
 // change this number any time without touching the database.
@@ -4336,6 +4341,12 @@ function AuthShell({ children, footer }) {
         </div>
         {children}
         {footer && <div style={{ marginTop: 18, textAlign: 'center' }}>{footer}</div>}
+        <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${LINE}`, display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap', fontSize: 11.5 }}>
+          <a href="/pricing" style={{ color: SUB, textDecoration: 'none' }}>Pricing</a>
+          <a href="/terms" style={{ color: SUB, textDecoration: 'none' }}>Terms</a>
+          <a href="/privacy" style={{ color: SUB, textDecoration: 'none' }}>Privacy</a>
+          <a href="mailto:Trbo.help@outlook.com" style={{ color: SUB, textDecoration: 'none' }}>Support</a>
+        </div>
       </div>
     </div>
   );
@@ -4449,6 +4460,17 @@ function SignupView({ onSignup, goLogin }) {
       }>
         <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8, textAlign: 'center' }}>Check your email</div>
         <AuthNote>We've sent a confirmation link to {email}. Click it, then come back here and log in to start your {TRIAL_DAYS}-day free trial.</AuthNote>
+      </AuthShell>
+    );
+  }
+
+  if (SIGNUPS_PAUSED) {
+    return (
+      <AuthShell footer={
+        <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Back to log in</button>
+      }>
+        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8, textAlign: 'center' }}>New signups aren't open yet</div>
+        <AuthNote>Trbo is between launches right now, so we're not creating new accounts at the moment. See <a href="/pricing" style={{ color: 'var(--accent)' }}>trbo.help/pricing</a> for what's coming, or email <a href="mailto:Trbo.help@outlook.com" style={{ color: 'var(--accent)' }}>Trbo.help@outlook.com</a> and we'll let you know when it's back.</AuthNote>
       </AuthShell>
     );
   }
@@ -4901,6 +4923,7 @@ export default function App() {
   }
 
   async function handleSignup(name, email, password) {
+    if (SIGNUPS_PAUSED) return { error: 'New signups aren’t open yet. Check back soon, or contact Trbo.help@outlook.com.' };
     const { data, error } = await supabase.auth.signUp({
       email, password,
       options: { data: { name }, emailRedirectTo: window.location.origin },

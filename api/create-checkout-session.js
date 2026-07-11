@@ -6,8 +6,8 @@ import Stripe from 'stripe';
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Keep these two in sync with MONTHLY_PRICE_LABEL / ANNUAL_PRICE_LABEL in src/App.jsx.
-const MONTHLY_PRICE_CENTS = 799; // $7.99/month
-const ANNUAL_PRICE_CENTS = 7999; // $79.99/year (about 2 months free vs monthly)
+const MONTHLY_PRICE_CENTS = 599; // $5.99/month
+const ANNUAL_PRICE_CENTS = 6589; // $65.89/year (11 months paid upfront, 12th free)
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
