@@ -2510,9 +2510,10 @@ function startOfWeek(dateStr) {
 }
 // Derives longest ride, best power numbers, streaks and totals purely from
 // completed session history — returns null until there's at least one
-// logged ride. avgPower/maxPower/avgHr/maxHr are only present on sessions
-// ridden with a trainer/heart rate monitor connected, so those particular
-// records simply don't appear until the person has ridden with one.
+// logged ride. avgPower/maxPower are only present on sessions ridden with a
+// trainer connected, so those particular records simply don't appear until
+// the person has ridden with one. Heart rate is never stored, so it never
+// contributes to personal records.
 function computePersonalRecords(workoutHistory) {
   const completed = (workoutHistory || []).filter(w => w.completed);
   if (completed.length === 0) return null;
@@ -2577,7 +2578,6 @@ function HistoryRow({ entry }) {
   const stats = [
     entry.avgPower != null && `${entry.avgPower}W avg`,
     entry.maxPower != null && `${entry.maxPower}W max`,
-    entry.avgHr != null && `${entry.avgHr} bpm avg`,
     entry.tss != null && `TSS ${Math.round(entry.tss)}`,
     entry.calories != null && `${entry.calories} kcal`,
   ].filter(Boolean);
@@ -3486,7 +3486,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const cadenceRef = useRef(trainer.cadence);
   const stepSamplesRef = useRef([]); // watt readings collected during the current ramp step
   const sessionPowerRef = useRef([]); // every watt reading for the whole session, for personal records
-  const sessionHrRef = useRef([]); // every bpm reading for the whole session, for personal records
+  const sessionHrRef = useRef([]); // in-memory only: bpm readings for this ride's on-screen summary + export. Never persisted.
   // One entry per second of the ride (power/hr/cadence, null where unknown)
   // — kept only for building a .tcx/.fit export right after finishing, not
   // persisted anywhere.
@@ -3537,6 +3537,11 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       startedAt: sessionStartRef.current || new Date(),
       workoutName: workout.name,
     });
+    // NOTE: avgHr/maxHr are deliberately NOT passed to onSessionEnd. Heart
+    // rate is read live and shown on screen, and is written into the .tcx/.fit
+    // file the rider downloads to their own device, but it is never persisted
+    // to our database or sent to any third party. Keeping heart rate out of
+    // stored records keeps it from becoming health data that we hold.
     if (onSessionEnd) {
       onSessionEnd({
         workoutId: workout.id || null,
@@ -3544,7 +3549,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
         category: workout.category || 'Custom',
         duration: dur,
         completed,
-        avgPower, maxPower, avgHr, maxHr, tss, calories,
+        avgPower, maxPower, tss, calories,
       });
     }
   }
@@ -3588,9 +3593,9 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
         }
         return next;
       });
-      // Collect every second's readings for the whole ride — used at the
-      // end to work out this session's average/peak power and heart rate
-      // for personal records. Independent of the ramp-test step tracking below.
+      // Collect every second's readings for the whole ride. Power feeds the
+      // stored session record; heart rate stays in memory and is used only for
+      // the on-screen finish summary and the rider's own file export.
       if (typeof trainerPowerRef.current === 'number') sessionPowerRef.current.push(trainerPowerRef.current);
       if (typeof heartRateRef.current === 'number') sessionHrRef.current.push(heartRateRef.current);
       sessionSeriesRef.current.push({
@@ -4078,6 +4083,9 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
         </div>
       )}
       {heartRate.errorMsg && <div style={{ fontSize: 12, color: RED, marginBottom: 6 }}>{heartRate.errorMsg}</div>}
+      <div style={{ fontSize: 12, color: MUTED, marginBottom: 6, lineHeight: 1.5 }}>
+        Your heart rate is shown live while you ride and is included in any workout file you export. It is never saved to your Trbo account and never sent to Strava.
+      </div>
       <div style={{ fontSize: 12, color: SUB, marginBottom: 6, lineHeight: 1.5 }}>
         Separate from your trainer — pair it here once and it'll show up alongside power during every ride.
       </div>
@@ -4708,7 +4716,7 @@ export default function App() {
       const { data: history } = await supabase.from('ftp_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
       if (mounted && history) setFtpHistory(history.map(h => ({ id: h.id, date: h.date, ftp: h.ftp, source: h.source })));
       const { data: sessions } = await supabase.from('workout_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
-      if (mounted && sessions) setWorkoutHistory(sessions.map(s => ({ id: s.id, date: s.date, workoutId: s.workout_id, name: s.name, category: s.category, duration: s.duration, completed: s.completed, avgPower: s.avg_power, maxPower: s.max_power, avgHr: s.avg_hr, maxHr: s.max_hr, tss: s.tss, calories: s.calories })));
+      if (mounted && sessions) setWorkoutHistory(sessions.map(s => ({ id: s.id, date: s.date, workoutId: s.workout_id, name: s.name, category: s.category, duration: s.duration, completed: s.completed, avgPower: s.avg_power, maxPower: s.max_power, tss: s.tss, calories: s.calories })));
       // Archived (finished/retired) training plans. Wrapped so that if the
       // archived_plans table hasn't been created yet, the app still loads
       // fine and simply shows no history.
@@ -4887,12 +4895,15 @@ export default function App() {
   }
   // Called once per session by the player, either when a workout finishes
   // naturally or when the rider confirms exiting/restarting partway through.
-  function recordWorkoutSession({ workoutId, name, category, duration, completed, avgPower, maxPower, avgHr, maxHr, tss, calories }) {
-    const entry = { id: newId(), date: new Date().toISOString(), workoutId, name, category, duration, completed, avgPower, maxPower, avgHr, maxHr, tss, calories };
+  // Heart rate is intentionally absent from everything below. It is displayed
+  // live during a ride and included in the file the rider exports themselves,
+  // but it is never written to our database and never sent to Strava.
+  function recordWorkoutSession({ workoutId, name, category, duration, completed, avgPower, maxPower, tss, calories }) {
+    const entry = { id: newId(), date: new Date().toISOString(), workoutId, name, category, duration, completed, avgPower, maxPower, tss, calories };
     setWorkoutHistory(list => [...list, entry]);
     if (user) supabase.from('workout_history').insert({
       id: entry.id, user_id: user.id, workout_id: workoutId, name, category, duration, completed, date: entry.date,
-      avg_power: avgPower ?? null, max_power: maxPower ?? null, avg_hr: avgHr ?? null, max_hr: maxHr ?? null,
+      avg_power: avgPower ?? null, max_power: maxPower ?? null,
       tss: tss ?? null, calories: calories ?? null,
     }).then(() => {});
     // Only push genuinely finished rides of real length to Strava — not
@@ -4901,7 +4912,7 @@ export default function App() {
       fetch('/api/strava-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, name, durationSeconds: duration, date: entry.date, avgPower, maxPower, avgHr, maxHr }),
+        body: JSON.stringify({ userId: user.id, name, durationSeconds: duration, date: entry.date, avgPower, maxPower }),
       }).catch(() => {});
     }
   }

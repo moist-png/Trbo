@@ -29,7 +29,9 @@ export default async function handler(req, res) {
     return;
   }
   try {
-    const { userId, name, durationSeconds, date, avgPower, maxPower, avgHr, maxHr } = req.body || {};
+    // Heart rate is deliberately not accepted here. Trbo shows it live but
+    // never stores or forwards it, so it is not part of the Strava payload.
+    const { userId, name, durationSeconds, date, avgPower, maxPower } = req.body || {};
     if (!userId || !name || !durationSeconds) {
       res.status(400).json({ error: 'Missing required fields.' });
       return;
@@ -56,8 +58,6 @@ export default async function handler(req, res) {
     const descriptionParts = [];
     if (avgPower != null) descriptionParts.push(`Avg power ${avgPower}W`);
     if (maxPower != null) descriptionParts.push(`Peak power ${maxPower}W`);
-    if (avgHr != null) descriptionParts.push(`Avg HR ${avgHr}bpm`);
-    if (maxHr != null) descriptionParts.push(`Peak HR ${maxHr}bpm`);
     const description = descriptionParts.length ? `Logged from Trbo \u2014 ${descriptionParts.join(' \u00b7 ')}` : 'Logged from Trbo';
 
     const activityRes = await fetch('https://www.strava.com/api/v3/activities', {

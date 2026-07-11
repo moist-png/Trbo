@@ -115,13 +115,20 @@ create index if not exists profiles_stripe_subscription_id_idx on public.profile
 -- is untouched.
 revoke update (subscribed, stripe_customer_id, stripe_subscription_id) on public.profiles from authenticated;
 
--- 7. Personal records: average/peak power and heart rate captured per ride
---    (only present on rides done with a trainer and/or heart rate monitor
---    connected), used to work out personal bests on the History screen.
+-- 7. Personal records: average/peak power captured per ride (only present on
+--    rides done with a trainer connected), used to work out personal bests on
+--    the History screen.
 alter table public.workout_history add column if not exists avg_power integer;
 alter table public.workout_history add column if not exists max_power integer;
-alter table public.workout_history add column if not exists avg_hr integer;
-alter table public.workout_history add column if not exists max_hr integer;
+
+-- 7b. Heart rate is NOT stored. Trbo reads heart rate over Bluetooth and shows
+--     it live during a ride, and includes it in the file a rider exports to
+--     their own device, but it is never written to this database. These two
+--     columns existed in earlier versions; dropping them permanently deletes
+--     any heart rate previously recorded, so that Trbo does not hold health
+--     data about its riders. Safe to re-run: the columns may already be gone.
+alter table public.workout_history drop column if exists avg_hr;
+alter table public.workout_history drop column if exists max_hr;
 
 -- 8. Private dashboard for you (the app owner) only -- signup counts, active
 --    subscribers, trial users and ride activity, never any other person's
