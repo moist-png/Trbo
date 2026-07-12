@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import PlannerView from './PlannerView';
+import { TrboMark } from './PublicPages';
 import { MiniGamesView, MiniGamePlayer } from './MiniGames';
 import {
   isNative, nativeRequestAndConnect, nativeStartNotifications, nativeWrite, nativeDisconnect, uuid16,
@@ -2201,8 +2202,8 @@ function LiveTimeline({ intervals, elapsed, total }) {
             const h = Math.max(14, Math.min(100, z.intensity * 78));
             const isFree = it.type === 'free';
             return (
-              <div key={it.id} style={{ width: w, minWidth: w, flexShrink: 0, height: '100%', display: 'flex', alignItems: 'flex-end', borderRight: `1px solid ${PANEL2}` }}>
-                <div style={{ width: '100%', height: `${h}%`, background: isFree ? `repeating-linear-gradient(135deg, ${z.color}, ${z.color} 4px, ${LINE} 4px, ${LINE} 8px)` : z.color }} />
+              <div key={it.id} style={{ width: w, minWidth: w, flexShrink: 0, height: '100%', display: 'flex', alignItems: 'flex-end', marginRight: 1 }}>
+                <div style={{ width: '100%', height: `${h}%`, borderRadius: 4, background: isFree ? `repeating-linear-gradient(135deg, ${z.color}, ${z.color} 4px, ${LINE} 4px, ${LINE} 8px)` : z.color }} />
               </div>
             );
           })}
@@ -2239,8 +2240,8 @@ function ProgressRing({ progress, color, size = 190 }) {
 
 // A compact semicircular gauge comparing live power against the current
 // interval's target — green near target, blue under, red over.
-function PowerGauge({ power, targetWatts }) {
-  const w = 148, h = 82, r = 64, stroke = 11;
+function PowerGauge({ power, targetWatts, width, height, radius, stroke: strokeProp }) {
+  const w = width || 148, h = height || 82, r = radius || 64, stroke = strokeProp || 11;
   const path = `M ${w / 2 - r} ${h} A ${r} ${r} 0 0 1 ${w / 2 + r} ${h}`;
   const ratio = targetWatts > 0 ? power / targetWatts : 0;
   const fillPct = Math.max(0, Math.min(100, (power / (targetWatts * 1.4 || 1)) * 100));
@@ -2290,6 +2291,28 @@ function IconBtn({ onClick, children, disabled, danger }) {
       background: PANEL2, color: disabled ? MUTED : (danger ? RED : TEXT),
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, flexShrink: 0,
+    }}>{children}</button>
+  );
+}
+// In-workout screen "Outline" control treatment: transparent circles instead
+// of filled squares/circles, so the skip/play controls read lighter against
+// the zone-tint wash. Skip buttons use a hairline ring + muted icon; the
+// play/pause button uses a thicker accent-color ring + accent icon.
+function ControlSkipBtn({ onClick, disabled, children }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      width: 34, height: 34, borderRadius: '50%', border: `1px solid ${LINE}`, background: 'transparent',
+      color: disabled ? MUTED : SUB, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, flexShrink: 0,
+    }}>{children}</button>
+  );
+}
+function ControlPlayBtn({ onClick, children }) {
+  return (
+    <button onClick={onClick} style={{
+      width: 58, height: 58, borderRadius: '50%', border: '2px solid var(--accent)', background: 'transparent',
+      color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer', flexShrink: 0,
     }}>{children}</button>
   );
 }
@@ -2969,9 +2992,16 @@ const LIBRARY_SORTS = [
   { key: 'easy', label: 'Easiest' },
   { key: 'hard', label: 'Hardest' },
 ];
-function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle }) {
+function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, category, onCategoryChange }) {
   const [query, setQuery] = useState('');
-  const [cat, setCat] = useState(lockedCategory || 'All');
+  const [localCat, setLocalCat] = useState(lockedCategory || 'All');
+  // Category can be driven externally (the sidebar's category list on wide
+  // viewports) or kept local (the chip row shown on portrait phone) — both
+  // read/write the same value so the two stay in sync.
+  const cat = category !== undefined ? category : localCat;
+  const setCat = onCategoryChange || setLocalCat;
+  const navLayout = useNavLayout();
+  const cardBarHeight = navLayout.mode === 'sidebar' ? (navLayout.width >= 200 ? 56 : navLayout.width >= 168 ? 48 : 40) : 40;
   const [sort, setSort] = useState('default');
   const all = useMemo(() => {
     const withFlag = LIBRARY.map(w => ({ ...w, custom: false })).concat(customWorkouts.map(w => ({ ...w, custom: true })));
@@ -2991,8 +3021,8 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle }
 
   return (
     <div style={{ padding: '16px 16px 80px' }}>
-      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, fontWeight: 600, color: TEXT, letterSpacing: 0.3, marginBottom: 2 }}>{title || 'Workout library'}</div>
-      <div style={{ fontSize: 13, color: SUB, marginBottom: 14 }}>{subtitle || `${all.length} workout${all.length === 1 ? '' : 's'} · pick one and go`}</div>
+      <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 800, textTransform: 'uppercase', fontSize: 26, color: TEXT, letterSpacing: -0.3, marginBottom: 2 }}>{title || 'Workout library'}</div>
+      <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, color: SUB, marginBottom: 14 }}>{subtitle || `${all.length} workout${all.length === 1 ? '' : 's'} · pick one and go`}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 12px', marginBottom: 12 }}>
         <Search size={16} color={SUB} />
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search workouts"
@@ -3012,12 +3042,12 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle }
           const total = totalDuration(w.intervals);
           return (
             <div key={w.id} onClick={() => onOpen(w)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, cursor: 'pointer' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                <div style={{ fontWeight: 600, fontSize: 15, color: TEXT }}>{w.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--accent)' }}>{fmtLong(total)}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
+                <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 700, fontSize: 17, color: TEXT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 12, color: 'var(--accent)', flexShrink: 0 }}>{fmtLong(total)}</div>
               </div>
-              <div style={{ fontSize: 12.5, color: SUB, marginBottom: 10 }}>{w.description}</div>
-              <ProfileChart intervals={w.intervals} height={40} />
+              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, color: SUB, marginBottom: 10 }}>{w.description}</div>
+              <ProfileChart intervals={w.intervals} height={cardBarHeight} />
             </div>
           );
         })}
@@ -3883,6 +3913,62 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const ringProgress = isDone ? 1 : Math.min(1, (current.duration - Math.max(0, timeLeft)) / current.duration);
   const targetWattsForGauge = displayCurrent.type === 'power' ? Math.round((ftp * displayCurrent.target) / 100) : 0;
 
+  // Orientation-aware layout: landscape (mounted on the bars) puts target/
+  // ring/current side by side with controls to the right; portrait stacks
+  // the ring alone, then each chip, then controls below. Driven by the same
+  // JS orientation hook OrientationGate already uses elsewhere, not just a
+  // CSS breakpoint, so the DOM order itself changes between the two.
+  const isPortrait = useOrientation();
+  const compact = settings.compactLabels;
+  const ringSize = isDone
+    ? (isPortrait ? (compact ? 130 : 170) : (compact ? 100 : 128))
+    : (isPortrait ? (compact ? 115 : 150) : (compact ? 80 : 102));
+  const timerFontSize = isDone
+    ? (isPortrait ? (compact ? 36 : 46) : (compact ? 27 : 34))
+    : (isPortrait ? (compact ? 30 : 38) : (compact ? 22 : 28));
+  const FONT_HEAD = "'Big Shoulders Display', sans-serif";
+  const FONT_BODY = "'Manrope', sans-serif";
+  const FONT_NUM = "'Space Grotesk', sans-serif";
+
+  function StatChip({ label, value, valueColor }) {
+    return (
+      <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: isPortrait ? '8px 10px' : '8px 14px', minWidth: 80, width: isPortrait ? 150 : undefined, boxSizing: 'border-box' }}>
+        <div style={{ fontFamily: FONT_BODY, fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>{label}</div>
+        <div style={{ fontFamily: FONT_NUM, fontSize: 18, fontWeight: 600, color: valueColor || TEXT, marginTop: 2, whiteSpace: 'nowrap' }}>{value}</div>
+      </div>
+    );
+  }
+
+  const targetChip = canAdjustIntensity ? (
+    <div style={{ position: 'relative', width: isPortrait ? 150 : undefined }}>
+      {isDemo && !showIntensityAdjust && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: 8,
+          background: 'var(--accent)', color: INK, fontFamily: FONT_BODY, fontSize: 11, fontWeight: 700, padding: '5px 10px',
+          borderRadius: 8, whiteSpace: 'nowrap', animation: 'demo-tag-bounce 1.8s ease-in-out infinite', pointerEvents: 'none', zIndex: 2,
+        }}>
+          Tap to adjust intensity
+          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid var(--accent)' }} />
+        </div>
+      )}
+      <button onClick={() => setShowIntensityAdjust(v => !v)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%', boxSizing: 'border-box' }}>
+        <StatChip label={`Target${intensityAdjust !== 1 ? ` · ${Math.round(intensityAdjust * 100)}%` : ''}`} value={targetTxt} />
+      </button>
+    </div>
+  ) : (
+    <StatChip label="Target" value={targetTxt} />
+  );
+  const currentChip = <StatChip label="Current" value={currentPowerTxt} valueColor={trainer.status === 'connected' ? 'var(--accent)' : TEXT} />;
+  const ringTimerBlock = (
+    <div className="ring-box" style={{ position: 'relative', width: ringSize, height: ringSize, display: 'flex', alignItems: 'center', justifyContent: 'center', isolation: 'isolate', flexShrink: 0, margin: isPortrait || isDone ? '0 auto' : undefined }}>
+      {settings.visualProgressRing && <ProgressRing progress={isDone ? 1 : ringProgress} color={z.color} size={ringSize} />}
+      <div className="player-timer" style={{ fontFamily: FONT_NUM, fontSize: timerFontSize, fontWeight: 600, color: TEXT, lineHeight: 1 }}>
+        {isDone ? (testResult ? `${testResult.ftp}W` : fmtLong(total)) : fmt(Math.max(0, timeLeft))}
+      </div>
+    </div>
+  );
+  const gaugeSize = isPortrait ? { width: 150, height: 80, radius: 62, stroke: 10 } : { width: 120, height: 64, radius: 48, stroke: 9 };
+
   return (
     <div className="player-screen" style={{ padding: '14px 16px 16px', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', isolation: 'isolate' }}>
       {settings.visualZoneWash && (
@@ -3891,95 +3977,59 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       {celebrate && <Confetti pieces={confettiRef.current} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexShrink: 0 }}>
-        <button onClick={() => requestAction('exit')} style={{ background: 'none', border: 'none', color: SUB, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}><X size={18} /> Exit</button>
-        <div style={{ fontSize: 13, color: SUB }}>{workout.name}</div>
+        <button onClick={() => requestAction('exit')} style={{ background: 'none', border: 'none', color: SUB, fontFamily: FONT_BODY, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}><X size={18} /> Exit</button>
+        <div style={{ fontFamily: FONT_HEAD, fontWeight: 900, textTransform: 'uppercase', fontSize: 16, letterSpacing: -0.3, color: TEXT, textAlign: 'right', lineHeight: 1.1 }}>{workout.name}</div>
       </div>
 
       <div className="player-main" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
         <div className="player-stats" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 13, color: z.color, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 13, color: isDone ? SUB : z.color, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
             {isDone ? (testResult ? (testResult.auto ? 'Test ended — that’s your limit' : 'Ramp test complete') : 'Workout complete') : (current.label || z.name)}
           </div>
+
           {!isDone ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
-              {canAdjustIntensity ? (
-                <div style={{ position: 'relative' }}>
-                  {isDemo && !showIntensityAdjust && (
-                    <div style={{
-                      position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: 8,
-                      background: 'var(--accent)', color: INK, fontSize: 11, fontWeight: 700, padding: '5px 10px',
-                      borderRadius: 8, whiteSpace: 'nowrap', animation: 'demo-tag-bounce 1.8s ease-in-out infinite', pointerEvents: 'none', zIndex: 2,
-                    }}>
-                      Tap to adjust intensity
-                      <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid var(--accent)' }} />
-                    </div>
-                  )}
-                  <button onClick={() => setShowIntensityAdjust(v => !v)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', minWidth: 80, cursor: 'pointer', textAlign: 'left' }}>
-                    <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>
-                      Target{intensityAdjust !== 1 ? ` · ${Math.round(intensityAdjust * 100)}%` : ''}
-                    </div>
-                    <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, fontWeight: 700, color: TEXT, marginTop: 2 }}>{targetTxt}</div>
-                  </button>
-                </div>
-              ) : (
-                <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', minWidth: 80 }}>
-                  <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Target</div>
-                  <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, fontWeight: 700, color: TEXT, marginTop: 2 }}>{targetTxt}</div>
-                </div>
-              )}
-
-              <div className="ring-box" style={{ position: 'relative', width: settings.compactLabels ? 140 : 190, height: settings.compactLabels ? 140 : 190, display: 'flex', alignItems: 'center', justifyContent: 'center', isolation: 'isolate', flexShrink: 0 }}>
-                {settings.visualProgressRing && (
-                  <ProgressRing progress={ringProgress} color={z.color} size={settings.compactLabels ? 140 : 190} />
-                )}
-                <div className="player-timer" style={{ fontFamily: 'Space Mono, monospace', fontSize: settings.compactLabels ? 36 : 50, fontWeight: 700, color: TEXT, lineHeight: 1 }}>
-                  {fmt(Math.max(0, timeLeft))}
-                </div>
+            isPortrait ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                {ringTimerBlock}
+                {targetChip}
+                {currentChip}
               </div>
-
-              <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', minWidth: 80 }}>
-                <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Current</div>
-                <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 18, fontWeight: 700, color: trainer.status === 'connected' ? 'var(--accent)' : TEXT, marginTop: 2 }}>{currentPowerTxt}</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 12 }}>
+                <div style={{ justifySelf: 'end' }}>{targetChip}</div>
+                {ringTimerBlock}
+                <div style={{ justifySelf: 'start' }}>{currentChip}</div>
               </div>
-            </div>
-          ) : (
-            <div className="ring-box" style={{ position: 'relative', width: settings.compactLabels ? 150 : 200, height: settings.compactLabels ? 150 : 200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', isolation: 'isolate' }}>
-              {settings.visualProgressRing && (
-                <ProgressRing progress={1} color={z.color} size={settings.compactLabels ? 150 : 200} />
-              )}
-              <div className="player-timer" style={{ fontFamily: 'Space Mono, monospace', fontSize: settings.compactLabels ? 40 : 56, fontWeight: 700, color: TEXT, lineHeight: 1 }}>
-                {testResult ? `${testResult.ftp}W` : fmtLong(total)}
-              </div>
-            </div>
-          )}
+            )
+          ) : ringTimerBlock}
 
           {!isDone && canAdjustIntensity && showIntensityAdjust && (
             <div style={{ marginTop: 10, padding: '10px 12px', background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10 }}>
-              <div style={{ fontSize: 11.5, color: SUB, marginBottom: 8 }}>
+              <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 8 }}>
                 Too hard? Scale back your remaining power targets for the rest of this ride.
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                 <IconBtn onClick={() => setIntensityAdjust(v => Math.max(0.5, Math.round((v - 0.05) * 100) / 100))} disabled={intensityAdjust <= 0.5}>−</IconBtn>
                 <div style={{ minWidth: 60 }}>
-                  <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 17, fontWeight: 700, color: TEXT }}>{Math.round(intensityAdjust * 100)}%</div>
-                  <div style={{ fontSize: 10, color: SUB }}>of plan</div>
+                  <div style={{ fontFamily: FONT_NUM, fontSize: 17, fontWeight: 600, color: TEXT }}>{Math.round(intensityAdjust * 100)}%</div>
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 10, color: SUB }}>of plan</div>
                 </div>
                 <IconBtn onClick={() => setIntensityAdjust(v => Math.min(1, Math.round((v + 0.05) * 100) / 100))} disabled={intensityAdjust >= 1}>+</IconBtn>
                 {intensityAdjust !== 1 && (
-                  <button onClick={() => setIntensityAdjust(1)} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, textDecoration: 'underline', cursor: 'pointer', marginLeft: 4 }}>Reset</button>
+                  <button onClick={() => setIntensityAdjust(1)} style={{ background: 'none', border: 'none', color: SUB, fontFamily: FONT_BODY, fontSize: 12, textDecoration: 'underline', cursor: 'pointer', marginLeft: 4 }}>Reset</button>
                 )}
               </div>
             </div>
           )}
 
           {!isDone && settings.visualPowerGauge && trainer.status === 'connected' && current.type === 'power' && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 6 }}>
-              <PowerGauge power={trainer.power || 0} targetWatts={targetWattsForGauge} />
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: isPortrait ? 18 : 6 }}>
+              <PowerGauge power={trainer.power || 0} targetWatts={targetWattsForGauge} width={gaugeSize.width} height={gaugeSize.height} radius={gaugeSize.radius} stroke={gaugeSize.stroke} />
             </div>
           )}
 
           {!isDone && (trainer.status === 'connected' && trainer.cadence !== null || heartRate && heartRate.status === 'connected' && heartRate.bpm !== null) && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 12, fontSize: 12, color: SUB, marginTop: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12, fontFamily: FONT_BODY, fontSize: 12, color: SUB, marginTop: 8 }}>
               {trainer.status === 'connected' && trainer.cadence !== null && <span>{trainer.cadence} rpm</span>}
               {heartRate && heartRate.status === 'connected' && heartRate.bpm !== null && (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><HeartPulse size={12} /> {heartRate.bpm} bpm</span>
@@ -3988,7 +4038,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
           )}
 
           {isDone && (
-            <div style={{ fontSize: 16, color: SUB, marginTop: 6 }}>
+            <div style={{ fontFamily: FONT_BODY, fontSize: 16, color: SUB, marginTop: 6 }}>
               {testResult ? 'Estimated FTP — saved to your FTP history' : 'Nice work — here’s how it went.'}
             </div>
           )}
@@ -3998,7 +4048,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
               <button
                 onClick={() => { if (onApplyFtp) onApplyFtp(testResult.ftp); setFtpApplied(true); }}
                 disabled={ftpApplied}
-                style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: ftpApplied ? PANEL2 : 'var(--accent)', color: ftpApplied ? SUB : INK, fontWeight: 700, fontSize: 14, cursor: ftpApplied ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: ftpApplied ? PANEL2 : 'var(--accent)', color: ftpApplied ? SUB : INK, fontFamily: FONT_BODY, fontWeight: 700, fontSize: 14, cursor: ftpApplied ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
                 {ftpApplied ? <Check size={16} /> : <Zap size={16} />} {ftpApplied ? 'FTP updated' : `Update my FTP to ${testResult.ftp}W`}
               </button>
             </div>
@@ -4016,8 +4066,8 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
                   finishSummary.calories != null && { label: 'Calories (est.)', value: `${finishSummary.calories}` },
                 ].filter(Boolean).map((c, i) => (
                   <div key={i} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 9.5, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>{c.label}</div>
-                    <div style={{ fontFamily: 'Space Mono, monospace', fontSize: 15, fontWeight: 700, color: TEXT, marginTop: 2 }}>{c.value}</div>
+                    <div style={{ fontFamily: FONT_BODY, fontSize: 9.5, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>{c.label}</div>
+                    <div style={{ fontFamily: FONT_NUM, fontSize: 15, fontWeight: 600, color: TEXT, marginTop: 2 }}>{c.value}</div>
                   </div>
                 ))}
               </div>
@@ -4029,7 +4079,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
                       buildTcx({ startedAt: finishSummary.startedAt, series: finishSummary.series, name: finishSummary.workoutName, calories: finishSummary.calories }),
                       'application/vnd.garmin.tcx+xml'
                     )}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
                     <Download size={13} /> Export .TCX
                   </button>
                   <button
@@ -4038,7 +4088,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
                       buildFit({ startedAt: finishSummary.startedAt, series: finishSummary.series }),
                       'application/octet-stream'
                     )}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
                     <Download size={13} /> Export .FIT
                   </button>
                 </div>
@@ -4047,7 +4097,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
           )}
 
           {!isDone && next && settings.showNextPreview && (
-            <div style={{ marginTop: 14, fontSize: 12.5, color: SUB }}>
+            <div style={{ marginTop: 14, fontFamily: FONT_BODY, fontSize: 12.5, color: SUB }}>
               Up next: <span style={{ color: TEXT }}>{next.label}</span> · {fmt(next.duration)}
             </div>
           )}
@@ -4055,16 +4105,16 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
 
         <div className="player-controls">
           <div className="player-controls-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 8 }}>
-            <IconBtn onClick={() => skip(-1)} disabled={currentIndex === 0}><SkipBack size={18} /></IconBtn>
-            <button onClick={isDone ? () => requestAction('restart') : togglePlay} style={{ width: 58, height: 58, borderRadius: '50%', border: 'none', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
-              {isDone ? <RotateCcw size={24} color={INK} /> : isPlaying ? <Pause size={24} color={INK} fill={INK} /> : <Play size={24} color={INK} fill={INK} style={{ marginLeft: 3 }} />}
-            </button>
-            <IconBtn onClick={() => skip(1)} disabled={currentIndex === intervals.length - 1}><SkipForward size={18} /></IconBtn>
+            <ControlSkipBtn onClick={() => skip(-1)} disabled={currentIndex === 0}><SkipBack size={18} /></ControlSkipBtn>
+            <ControlPlayBtn onClick={isDone ? () => requestAction('restart') : togglePlay}>
+              {isDone ? <RotateCcw size={24} /> : isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 3 }} />}
+            </ControlPlayBtn>
+            <ControlSkipBtn onClick={() => skip(1)} disabled={currentIndex === intervals.length - 1}><SkipForward size={18} /></ControlSkipBtn>
           </div>
 
           {!isDone && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
-              <button onClick={() => requestAction('restart')} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '6px 10px' }}>
+              <button onClick={() => requestAction('restart')} style={{ background: 'none', border: 'none', color: SUB, fontFamily: FONT_BODY, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '6px 10px' }}>
                 <RotateCcw size={13} /> Restart
               </button>
             </div>
@@ -4077,15 +4127,20 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       </div>
 
       {pendingAction && (
-        <ConfirmModal
-          title={pendingAction === 'exit' ? 'Exit workout?' : 'Restart workout?'}
-          message="Your ride is still running — are you sure you want to continue?"
-          cancelLabel="Keep riding"
-          confirmLabel={pendingAction === 'exit' ? 'Exit' : 'Restart'}
-          danger
-          onCancel={cancelPendingAction}
-          onConfirm={() => performAction(pendingAction)}
-        />
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={cancelPendingAction}>
+          <div onClick={e => e.stopPropagation()} style={{ background: BG, borderRadius: 16, padding: 22, width: '100%', maxWidth: 340, textAlign: 'center' }}>
+            <div style={{ fontFamily: FONT_HEAD, fontWeight: 900, textTransform: 'uppercase', fontSize: 24, letterSpacing: -0.5, color: TEXT, marginBottom: 8 }}>
+              {pendingAction === 'exit' ? 'Exit workout?' : 'Restart workout?'}
+            </div>
+            <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: SUB, lineHeight: 1.6, marginBottom: 20 }}>
+              Your ride is still running — are you sure you want to continue?
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={cancelPendingAction} style={{ flex: 1, padding: '11px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontFamily: FONT_BODY, fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>Keep riding</button>
+              <button onClick={() => performAction(pendingAction)} style={{ flex: 1, padding: '11px 0', borderRadius: 10, border: 'none', background: RED, color: '#fff', fontFamily: FONT_BODY, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>{pendingAction === 'exit' ? 'Exit' : 'Restart'}</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -4331,21 +4386,30 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
 }
 
 // ---------- auth screens ----------
+// Signed-out auth flow (login/signup/forgot/reset password) is rendered in
+// the app's brand theme always, not whatever theme a not-yet-loaded profile
+// might prefer — this keeps a visitor's first screen consistent with the
+// public marketing pages (/pricing, /terms, /privacy), which use the same
+// locked palette. See design_handoff_trbo bundle + PublicPages.jsx.
+const AUTH = THEMES.palette;
+const AUTH_FONT_HEAD = "'Big Shoulders Display', sans-serif";
+const AUTH_FONT_BODY = "'Manrope', sans-serif";
+
 function AuthShell({ children, footer }) {
   return (
-    <div style={{ minHeight: '100%', background: BG, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px 20px', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ minHeight: '100%', background: AUTH.bg, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px 20px', fontFamily: AUTH_FONT_BODY }}>
       <div style={{ maxWidth: 380, width: '100%', margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 28 }}>
-          <Zap size={22} color="var(--accent)" />
-          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.4 }}>Trbo</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', marginBottom: 28 }}>
+          <TrboMark size={34} />
+          <div style={{ fontFamily: AUTH_FONT_HEAD, fontWeight: 900, textTransform: 'uppercase', fontSize: 22, color: AUTH.text, letterSpacing: -0.4 }}>Trbo</div>
         </div>
         {children}
         {footer && <div style={{ marginTop: 18, textAlign: 'center' }}>{footer}</div>}
-        <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${LINE}`, display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap', fontSize: 11.5 }}>
-          <a href="/pricing" style={{ color: SUB, textDecoration: 'none' }}>Pricing</a>
-          <a href="/terms" style={{ color: SUB, textDecoration: 'none' }}>Terms</a>
-          <a href="/privacy" style={{ color: SUB, textDecoration: 'none' }}>Privacy</a>
-          <a href="mailto:Trbo.help@outlook.com" style={{ color: SUB, textDecoration: 'none' }}>Support</a>
+        <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${AUTH.line}`, display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap', fontSize: 11.5 }}>
+          <a href="/pricing" style={{ color: AUTH.sub, textDecoration: 'none' }}>Pricing</a>
+          <a href="/terms" style={{ color: AUTH.sub, textDecoration: 'none' }}>Terms</a>
+          <a href="/privacy" style={{ color: AUTH.sub, textDecoration: 'none' }}>Privacy</a>
+          <a href="mailto:Trbo.help@outlook.com" style={{ color: AUTH.sub, textDecoration: 'none' }}>Support</a>
         </div>
       </div>
     </div>
@@ -4354,17 +4418,17 @@ function AuthShell({ children, footer }) {
 function AuthField({ label, ...props }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={{ display: 'block', fontSize: 12.5, color: SUB, marginBottom: 5 }}>{label}</label>
-      <input {...props} style={{ width: '100%', background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '11px 12px', fontSize: 14.5, boxSizing: 'border-box' }} />
+      <label style={{ display: 'block', fontFamily: AUTH_FONT_BODY, fontSize: 12.5, color: AUTH.sub, marginBottom: 5 }}>{label}</label>
+      <input {...props} style={{ width: '100%', background: AUTH.panel2, border: `1px solid ${AUTH.line}`, borderRadius: 8, color: AUTH.text, fontFamily: AUTH_FONT_BODY, padding: '11px 12px', fontSize: 14.5, boxSizing: 'border-box' }} />
     </div>
   );
 }
 function AuthError({ children }) {
   if (!children) return null;
-  return <div style={{ background: 'rgba(255,77,77,0.1)', border: `1px solid ${RED}`, color: RED, borderRadius: 8, padding: '9px 12px', fontSize: 13, marginBottom: 12 }}>{children}</div>;
+  return <div style={{ background: hexToRgba(AUTH.red, 0.1), border: `1px solid ${AUTH.red}`, color: AUTH.red, borderRadius: 8, padding: '9px 12px', fontFamily: AUTH_FONT_BODY, fontSize: 13, marginBottom: 12 }}>{children}</div>;
 }
 function AuthNote({ children }) {
-  return <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8, padding: '9px 12px', fontSize: 12, color: SUB, marginBottom: 12, lineHeight: 1.5 }}>{children}</div>;
+  return <div style={{ background: AUTH.panel, border: `1px solid ${AUTH.line}`, borderRadius: 8, padding: '9px 12px', fontFamily: AUTH_FONT_BODY, fontSize: 12, color: AUTH.sub, marginBottom: 12, lineHeight: 1.5 }}>{children}</div>;
 }
 function SocialAuthButtons({ onError }) {
   async function handleProvider(provider, label) {
@@ -4380,10 +4444,23 @@ function SocialAuthButtons({ onError }) {
   }
   return (
     <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-      <button onClick={() => handleProvider('google', 'Google')} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Continue with Google</button>
-      <button onClick={() => handleProvider('apple', 'Apple')} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Continue with Apple</button>
+      <button onClick={() => handleProvider('google', 'Google')} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `1px solid ${AUTH.line}`, background: AUTH.panel2, color: AUTH.text, fontFamily: AUTH_FONT_BODY, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Continue with Google</button>
+      <button onClick={() => handleProvider('apple', 'Apple')} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: `1px solid ${AUTH.line}`, background: AUTH.panel2, color: AUTH.text, fontFamily: AUTH_FONT_BODY, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Continue with Apple</button>
     </div>
   );
+}
+// Shared look for the big Big Shoulders Display headline used atop every
+// auth screen ("Log in", "Start your free trial", etc).
+function AuthTitle({ children, tight }) {
+  return <div style={{ fontFamily: AUTH_FONT_HEAD, fontWeight: 900, textTransform: 'uppercase', fontSize: 22, letterSpacing: -0.4, color: AUTH.text, marginBottom: tight ? 4 : 16, textAlign: 'center' }}>{children}</div>;
+}
+function AuthPrimaryButton({ children, submitting, ...props }) {
+  return (
+    <button {...props} disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: AUTH.accent, color: INK, fontFamily: AUTH_FONT_BODY, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1 }}>{children}</button>
+  );
+}
+function AuthLink({ children, ...props }) {
+  return <button {...props} style={{ background: 'none', border: 'none', color: AUTH.accent, fontFamily: AUTH_FONT_BODY, fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>{children}</button>;
 }
 
 function LoginView({ onLogin, goSignup, goForgot }) {
@@ -4406,24 +4483,24 @@ function LoginView({ onLogin, goSignup, goForgot }) {
 
   return (
     <AuthShell footer={
-      <div style={{ fontSize: 13, color: SUB }}>
-        New here? <button onClick={goSignup} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Start your free trial</button>
+      <div style={{ fontFamily: AUTH_FONT_BODY, fontSize: 13, color: AUTH.sub }}>
+        New here? <AuthLink onClick={goSignup}>Start your free trial</AuthLink>
       </div>
     }>
-      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 16, textAlign: 'center' }}>Log in</div>
+      <AuthTitle>Log in</AuthTitle>
       <AuthError>{error}</AuthError>
       {socialMsg && <AuthNote>{socialMsg}</AuthNote>}
       <SocialAuthButtons onError={setSocialMsg} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px', color: SUB, fontSize: 11.5 }}>
-        <div style={{ flex: 1, height: 1, background: LINE }} /> OR <div style={{ flex: 1, height: 1, background: LINE }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px', color: AUTH.sub, fontFamily: AUTH_FONT_BODY, fontSize: 11.5 }}>
+        <div style={{ flex: 1, height: 1, background: AUTH.line }} /> OR <div style={{ flex: 1, height: 1, background: AUTH.line }} />
       </div>
       <form onSubmit={submit}>
         <AuthField label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
         <AuthField label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" />
         <div style={{ textAlign: 'right', marginBottom: 16 }}>
-          <button type="button" onClick={goForgot} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12.5, cursor: 'pointer', padding: 0 }}>Forgot password?</button>
+          <button type="button" onClick={goForgot} style={{ background: 'none', border: 'none', color: AUTH.sub, fontFamily: AUTH_FONT_BODY, fontSize: 12.5, cursor: 'pointer', padding: 0 }}>Forgot password?</button>
         </div>
-        <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Logging in…' : 'Log in'}</button>
+        <AuthPrimaryButton type="submit" submitting={submitting}>{submitting ? 'Logging in…' : 'Log in'}</AuthPrimaryButton>
       </form>
     </AuthShell>
   );
@@ -4455,10 +4532,8 @@ function SignupView({ onSignup, goLogin }) {
 
   if (confirmSent) {
     return (
-      <AuthShell footer={
-        <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Back to log in</button>
-      }>
-        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8, textAlign: 'center' }}>Check your email</div>
+      <AuthShell footer={<AuthLink onClick={goLogin}>Back to log in</AuthLink>}>
+        <AuthTitle tight>Check your email</AuthTitle>
         <AuthNote>We've sent a confirmation link to {email}. Click it, then come back here and log in to start your {TRIAL_DAYS}-day free trial.</AuthNote>
       </AuthShell>
     );
@@ -4466,36 +4541,36 @@ function SignupView({ onSignup, goLogin }) {
 
   if (SIGNUPS_PAUSED) {
     return (
-      <AuthShell footer={
-        <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Back to log in</button>
-      }>
-        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8, textAlign: 'center' }}>New signups aren't open yet</div>
-        <AuthNote>Trbo is between launches right now, so we're not creating new accounts at the moment. See <a href="/pricing" style={{ color: 'var(--accent)' }}>trbo.help/pricing</a> for what's coming, or email <a href="mailto:Trbo.help@outlook.com" style={{ color: 'var(--accent)' }}>Trbo.help@outlook.com</a> and we'll let you know when it's back.</AuthNote>
+      <AuthShell footer={<AuthLink onClick={goLogin}>Back to log in</AuthLink>}>
+        <AuthTitle tight>New signups aren't open yet</AuthTitle>
+        <AuthNote>Trbo is between launches right now, so we're not creating new accounts at the moment. See <a href="/pricing" style={{ color: AUTH.accent }}>trbo.help/pricing</a> for what's coming, or email <a href="mailto:Trbo.help@outlook.com" style={{ color: AUTH.accent }}>Trbo.help@outlook.com</a> and we'll let you know when it's back.</AuthNote>
       </AuthShell>
     );
   }
 
   return (
     <AuthShell footer={
-      <div style={{ fontSize: 13, color: SUB }}>
-        Already have an account? <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Log in</button>
+      <div style={{ fontFamily: AUTH_FONT_BODY, fontSize: 13, color: AUTH.sub }}>
+        Already have an account? <AuthLink onClick={goLogin}>Log in</AuthLink>
       </div>
     }>
-      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 4, textAlign: 'center' }}>Start your free trial</div>
-      <div style={{ fontSize: 12.5, color: SUB, textAlign: 'center', marginBottom: 16 }}>{TRIAL_DAYS} days free, then {MONTHLY_PRICE_LABEL}. Cancel anytime.</div>
+      <AuthTitle tight>Start your free trial</AuthTitle>
+      <div style={{ fontFamily: AUTH_FONT_BODY, fontSize: 12.5, color: AUTH.sub, textAlign: 'center', marginBottom: 16 }}>{TRIAL_DAYS} days free, then {MONTHLY_PRICE_LABEL}. Cancel anytime.</div>
       <AuthError>{error}</AuthError>
       {socialMsg && <AuthNote>{socialMsg}</AuthNote>}
       <SocialAuthButtons onError={setSocialMsg} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px', color: SUB, fontSize: 11.5 }}>
-        <div style={{ flex: 1, height: 1, background: LINE }} /> OR <div style={{ flex: 1, height: 1, background: LINE }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 16px', color: AUTH.sub, fontFamily: AUTH_FONT_BODY, fontSize: 11.5 }}>
+        <div style={{ flex: 1, height: 1, background: AUTH.line }} /> OR <div style={{ flex: 1, height: 1, background: AUTH.line }} />
       </div>
       <form onSubmit={submit}>
         <AuthField label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="name" />
         <AuthField label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
         <AuthField label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
         <AuthField label="Confirm password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Re-enter password" autoComplete="new-password" />
-        <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', marginTop: 4, opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Creating account…' : 'Start free trial'}</button>
-        <div style={{ fontSize: 11, color: SUB, textAlign: 'center', marginTop: 10, lineHeight: 1.5 }}>No payment required today. We'll ask for card details only when your trial ends.</div>
+        <div style={{ marginTop: 4 }}>
+          <AuthPrimaryButton type="submit" submitting={submitting}>{submitting ? 'Creating account…' : 'Start free trial'}</AuthPrimaryButton>
+        </div>
+        <div style={{ fontFamily: AUTH_FONT_BODY, fontSize: 11, color: AUTH.sub, textAlign: 'center', marginTop: 10, lineHeight: 1.5 }}>No payment required today. We'll ask for card details only when your trial ends.</div>
       </form>
     </AuthShell>
   );
@@ -4518,19 +4593,17 @@ function ForgotPasswordView({ onReset, goLogin }) {
   }
 
   return (
-    <AuthShell footer={
-      <button onClick={goLogin} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 13 }}>Back to log in</button>
-    }>
-      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 8, textAlign: 'center' }}>Reset your password</div>
+    <AuthShell footer={<AuthLink onClick={goLogin}>Back to log in</AuthLink>}>
+      <AuthTitle>Reset your password</AuthTitle>
       {sent ? (
         <AuthNote>If an account exists for that email, we've just sent a real password reset link to it. Click the link in that email to set a new password.</AuthNote>
       ) : (
         <>
-          <div style={{ fontSize: 12.5, color: SUB, textAlign: 'center', marginBottom: 16 }}>Enter your email and we'll send you a link to reset your password.</div>
+          <div style={{ fontFamily: AUTH_FONT_BODY, fontSize: 12.5, color: AUTH.sub, textAlign: 'center', marginBottom: 16 }}>Enter your email and we'll send you a link to reset your password.</div>
           <AuthError>{error}</AuthError>
           <form onSubmit={submit}>
             <AuthField label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
-            <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Sending…' : 'Send reset link'}</button>
+            <AuthPrimaryButton type="submit" submitting={submitting}>{submitting ? 'Sending…' : 'Send reset link'}</AuthPrimaryButton>
           </form>
         </>
       )}
@@ -4557,13 +4630,13 @@ function UpdatePasswordView({ onUpdate }) {
 
   return (
     <AuthShell>
-      <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 19, color: TEXT, marginBottom: 4, textAlign: 'center' }}>Set a new password</div>
-      <div style={{ fontSize: 12.5, color: SUB, textAlign: 'center', marginBottom: 16 }}>You followed a password reset link. Choose a new password below.</div>
+      <AuthTitle tight>Set a new password</AuthTitle>
+      <div style={{ fontFamily: AUTH_FONT_BODY, fontSize: 12.5, color: AUTH.sub, textAlign: 'center', marginBottom: 16 }}>You followed a password reset link. Choose a new password below.</div>
       <AuthError>{error}</AuthError>
       <form onSubmit={submit}>
         <AuthField label="New password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
         <AuthField label="Confirm new password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Re-enter password" autoComplete="new-password" />
-        <button type="submit" disabled={submitting} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1 }}>{submitting ? 'Saving…' : 'Save new password'}</button>
+        <AuthPrimaryButton type="submit" submitting={submitting}>{submitting ? 'Saving…' : 'Save new password'}</AuthPrimaryButton>
       </form>
     </AuthShell>
   );
@@ -4733,6 +4806,105 @@ function OrientationGate({ preferredOrientation, children }) {
   );
 }
 
+// ---------- primary navigation (responsive) ----------
+// Portrait phone keeps the classic bottom tab bar. Landscape phone, tablet,
+// and laptop get a persistent left sidebar instead — fixes the old bottom
+// bar floating mis-centered (capped at 520px) on wide viewports. See
+// design_handoff_trbo/navigation/README.md for the full spec this implements.
+const NAV_ITEMS = [
+  { key: 'home', label: 'Home', Icon: Home },
+  { key: 'library', label: 'Library', Icon: Library },
+  { key: 'basics', label: 'Basics', Icon: Dumbbell },
+  { key: 'rides', label: 'Rides', Icon: Bike },
+  { key: 'planner', label: 'Planner', Icon: CalendarDays },
+  { key: 'builder', label: 'Builder', Icon: Wrench },
+  { key: 'settings', label: 'Settings', Icon: SettingsIcon },
+];
+// Sidebar-only inactive text color — a touch darker than the app's usual
+// SUB/muted token so labels stay readable against the sidebar's white panel
+// in every theme, per the nav design spec.
+const SIDEBAR_INACTIVE = '#6d6558';
+
+function computeNavLayout() {
+  if (typeof window === 'undefined') return { mode: 'sidebar', width: 200 };
+  const w = window.innerWidth;
+  const isLandscape = window.matchMedia ? window.matchMedia('(orientation: landscape)').matches : w > window.innerHeight;
+  if (w < 700 && !isLandscape) return { mode: 'bottombar', width: 0 };
+  const width = w >= 1180 ? 200 : w >= 860 ? 168 : 140;
+  return { mode: 'sidebar', width };
+}
+function useNavLayout() {
+  const [layout, setLayout] = useState(computeNavLayout);
+  useEffect(() => {
+    const update = () => setLayout(computeNavLayout());
+    window.addEventListener('resize', update);
+    let mq;
+    if (window.matchMedia) {
+      mq = window.matchMedia('(orientation: landscape)');
+      if (mq.addEventListener) mq.addEventListener('change', update); else mq.addListener(update);
+    }
+    return () => {
+      window.removeEventListener('resize', update);
+      if (mq) { if (mq.removeEventListener) mq.removeEventListener('change', update); else mq.removeListener(update); }
+    };
+  }, []);
+  return layout;
+}
+
+function NavRow({ active, onClick, Icon, label }) {
+  return (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 9, padding: '7px 10px', borderRadius: 8, border: 'none',
+      background: active ? 'var(--accent)' : 'transparent', color: active ? INK : SIDEBAR_INACTIVE,
+      fontWeight: active ? 700 : 500, fontSize: 12.5, fontFamily: "'Manrope', sans-serif",
+      cursor: 'pointer', textAlign: 'left', width: '100%',
+    }}>
+      {Icon && <Icon size={14} style={{ flexShrink: 0 }} />} <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  );
+}
+
+// Persistent left sidebar for landscape phone / tablet / laptop. Carries
+// primary nav plus the workout category filters underneath, in the same
+// chrome already used for category filtering elsewhere in the app.
+function SidebarNav({ view, onNavigate, width, category, onSelectCategory }) {
+  return (
+    <div style={{
+      width, flexShrink: 0, background: PANEL, borderRight: `1px solid ${LINE}`,
+      display: 'flex', flexDirection: 'column', paddingLeft: 'env(safe-area-inset-left)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '18px 14px 16px' }}>
+        <div style={{ width: 24, height: 24, borderRadius: 6, background: INK, flexShrink: 0 }} />
+        <span style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 900, fontSize: 16, color: TEXT, letterSpacing: -0.3 }}>TRBO</span>
+      </div>
+      <div style={{ padding: '0 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {NAV_ITEMS.map(({ key, label, Icon }) => (
+          <NavRow key={key} active={view === key} onClick={() => onNavigate(key)} Icon={Icon} label={label} />
+        ))}
+      </div>
+      <div style={{ margin: '16px 10px 0', paddingTop: 10, borderTop: `1px solid ${LINE}`, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', minHeight: 0 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: SUB, letterSpacing: 0.6, textTransform: 'uppercase', padding: '0 10px 4px' }}>Categories</div>
+        {CATEGORIES.concat('Custom').map(c => (
+          <NavRow key={c} active={view === 'library' && category === c} onClick={() => onSelectCategory(c)} label={c} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Classic bottom tab bar — unchanged treatment, kept for portrait phone.
+function BottomTabBar({ view, onNavigate }) {
+  return (
+    <div className="tabbar" style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: NAVBG, borderTop: `1px solid ${LINE}`, display: 'flex' }}>
+      {NAV_ITEMS.map(({ key, label, Icon }) => (
+        <button key={key} onClick={() => onNavigate(key)} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === key ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
+          <Icon size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------- app ----------
 export default function App() {
   const [view, setView] = useState('home');
@@ -4748,6 +4920,8 @@ export default function App() {
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [activeWorkout, setActiveWorkout] = useState(null);
   const [activeGame, setActiveGame] = useState(null); // a mini game currently being played (or null)
+  const [libCategory, setLibCategory] = useState('All'); // shared with the sidebar's category filters on wide viewports
+  const navLayout = useNavLayout(); // 'bottombar' (portrait phone) or 'sidebar' (landscape phone/tablet/laptop)
   // Public, signed-out preview — reached via a link ending in ?demo=ride
   // (the entry-point button on the login screen is added separately).
   // Takes priority over everything else, including an active session,
@@ -5118,7 +5292,6 @@ export default function App() {
     + " .player-screen { height: 100vh; height: 100dvh; box-sizing: border-box; }"
     + " .player-main { flex: 1; min-height: 0; overflow: auto; }"
     + " @media (orientation: landscape) { .player-main { flex-direction: row !important; align-items: center; justify-content: center; gap: 20px; } .player-stats { flex: 1 1 auto; max-width: 560px; } .player-controls { flex: 0 0 auto; } }"
-    + " @media (orientation: landscape) and (max-height: 420px) { .player-timer { font-size: 38px !important; } .ring-box { width: 120px !important; height: 120px !important; } .ring-box svg { width: 120px !important; height: 120px !important; } .player-controls-row { margin-top: 6px !important; } }"
     // finish-line celebration confetti
     + " @keyframes confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(420px) rotate(600deg); opacity: 0; } }"
     // gentle bounce drawing a first-time demo visitor's eye to the intensity dial
@@ -5227,30 +5400,47 @@ export default function App() {
     );
   }
 
+  const isSidebar = navLayout.mode === 'sidebar';
+  function handleNavigate(key) {
+    if (key === 'builder') setEditingWorkout(null);
+    setView(key);
+  }
+  function handleSelectCategory(c) {
+    setLibCategory(c);
+    setView('library');
+  }
+
   return (
-    <div style={{ ...wrapStyle, position: 'relative', paddingBottom: 'calc(54px + env(safe-area-inset-bottom))' }}>
+    <div style={{ ...wrapStyle, position: 'relative', ...(isSidebar ? {} : { paddingBottom: 'calc(54px + env(safe-area-inset-bottom))' }) }}>
       <style>{globalStyle}</style>
       <OrientationGate preferredOrientation={settings.preferredOrientation}>
-        {!hasFullAccess && <TrialBanner daysLeft={daysLeft} onUpgrade={() => setShowPaywallModal(true)} />}
+        <div style={isSidebar ? { display: 'flex', minHeight: '100%' } : undefined}>
+          {isSidebar && (
+            <SidebarNav view={view} onNavigate={handleNavigate} width={navLayout.width} category={libCategory} onSelectCategory={handleSelectCategory} />
+          )}
+          <div style={isSidebar ? { flex: 1, minWidth: 0 } : undefined}>
+            {!hasFullAccess && <TrialBanner daysLeft={daysLeft} onUpgrade={() => setShowPaywallModal(true)} />}
 
-        {view === 'home' && <HomeView account={account} ftpHistory={ftpHistory} workoutHistory={workoutHistory} trainingPlan={trainingPlan} onNavigate={setView} />}
-        {view === 'library' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} />}
-        {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" />}
-        {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" />}
-        {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
-        {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} />}
-        {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
-        {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
-        {view === 'history' && <HistoryView workoutHistory={workoutHistory} onClear={clearWorkoutHistory} />}
-        {view === 'settings' && (
-          <SettingsView
-            settings={settings} updateSetting={updateSetting} ftp={ftp} setFtp={setFtp} trainer={trainer} heartRate={heartRate}
-            customWorkouts={customWorkouts} onResetCustom={resetCustomWorkouts} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory}
-            account={account} daysLeft={daysLeft} subscribed={subscribed} compAccess={compAccess} onLogout={handleLogout} onShowPaywall={() => setShowPaywallModal(true)}
-            ownerStats={ownerStats}
-            stravaConnected={!!(profile && profile.strava_athlete_id)} onConnectStrava={connectStrava} onDisconnectStrava={disconnectStrava}
-          />
-        )}
+            {view === 'home' && <HomeView account={account} ftpHistory={ftpHistory} workoutHistory={workoutHistory} trainingPlan={trainingPlan} onNavigate={setView} />}
+            {view === 'library' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} category={libCategory} onCategoryChange={setLibCategory} />}
+            {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" />}
+            {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" />}
+            {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
+            {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} />}
+            {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
+            {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
+            {view === 'history' && <HistoryView workoutHistory={workoutHistory} onClear={clearWorkoutHistory} />}
+            {view === 'settings' && (
+              <SettingsView
+                settings={settings} updateSetting={updateSetting} ftp={ftp} setFtp={setFtp} trainer={trainer} heartRate={heartRate}
+                customWorkouts={customWorkouts} onResetCustom={resetCustomWorkouts} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory}
+                account={account} daysLeft={daysLeft} subscribed={subscribed} compAccess={compAccess} onLogout={handleLogout} onShowPaywall={() => setShowPaywallModal(true)}
+                ownerStats={ownerStats}
+                stravaConnected={!!(profile && profile.strava_athlete_id)} onConnectStrava={connectStrava} onDisconnectStrava={disconnectStrava}
+              />
+            )}
+          </div>
+        </div>
 
         {detailWorkout && (
           <WorkoutDetail
@@ -5269,29 +5459,7 @@ export default function App() {
           <PaywallView onClose={() => setShowPaywallModal(false)} onLogout={handleLogout} userId={user.id} email={user.email} />
         )}
 
-        <div className="tabbar" style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: NAVBG, borderTop: `1px solid ${LINE}`, display: 'flex', maxWidth: 520, margin: '0 auto' }}>
-          <button onClick={() => setView('home')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'home' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
-            <Home size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Home</span>
-          </button>
-          <button onClick={() => setView('library')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'library' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
-            <Library size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Library</span>
-          </button>
-          <button onClick={() => setView('basics')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'basics' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
-            <Dumbbell size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Basics</span>
-          </button>
-          <button onClick={() => setView('rides')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'rides' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
-            <Bike size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Rides</span>
-          </button>
-          <button onClick={() => setView('planner')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'planner' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
-            <CalendarDays size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Planner</span>
-          </button>
-          <button onClick={() => { setEditingWorkout(null); setView('builder'); }} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'builder' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
-            <Wrench size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Builder</span>
-          </button>
-          <button onClick={() => setView('settings')} className="tabbar-btn" style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: view === 'settings' ? 'var(--accent)' : SUB, cursor: 'pointer' }}>
-            <SettingsIcon size={18} /><span style={{ fontSize: 10, fontWeight: 600 }}>Settings</span>
-          </button>
-        </div>
+        {!isSidebar && <BottomTabBar view={view} onNavigate={handleNavigate} />}
       </OrientationGate>
     </div>
   );
