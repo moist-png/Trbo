@@ -586,8 +586,10 @@ const LIBRARY = [
   {
     id: 'ftp-test-20', name: '20 minute FTP test', category: 'Basics',
     description: 'The standard test protocol for finding your current FTP.',
-    notes: 'After the 20 minute effort, take your average power for that block and multiply by 0.95. That number is your new FTP — update it in Settings.',
+    notes: 'If a trainer or power meter is connected, the app will average your power for the 20 minute effort and work out your new FTP for you automatically as soon as it ends. Without one connected, take your average power for that block yourself and multiply by 0.95 — that’s your new FTP, update it in Settings.',
     fixedLength: true,
+    ftpTestLabel: '20 minute test',
+    ftpMultiplier: 0.95,
     intervals: [
       iv('Warm up', 600, 'power', 55),
       iv('Opener', 60, 'rpe', 8), iv('Easy', 60, 'power', 50),
@@ -3663,6 +3665,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const heartRateRef = useRef(heartRate ? heartRate.bpm : null);
   const cadenceRef = useRef(trainer.cadence);
   const stepSamplesRef = useRef([]); // watt readings collected during the current ramp step
+  const ftpTestSamplesRef = useRef([]); // watt readings collected during a workout's designated FTP-test block (e.g. the 20 minute test)
   const sessionPowerRef = useRef([]); // every watt reading for the whole session, for personal records
   const sessionHrRef = useRef([]); // in-memory only: bpm readings for this ride's on-screen summary + export. Never persisted.
   // One entry per second of the ride (power/hr/cadence, null where unknown)
@@ -3839,6 +3842,14 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
           underPowerStreakRef.current = 0;
         }
       }
+      // Fixed-block FTP test (e.g. the 20 minute test): log the rider's
+      // actual watts each second while they're inside the labeled test
+      // interval, so an average — and an FTP estimate — can be worked out
+      // the moment that block ends.
+      if (workout.ftpTestLabel && intervals[currentIndex].label === workout.ftpTestLabel) {
+        const power = trainerPowerRef.current;
+        if (typeof power === 'number') ftpTestSamplesRef.current.push(power);
+      }
     }, 1000);
     return () => clearInterval(t);
   }, [isPlaying, isDone, currentIndex, settings.soundCountdown, settings.soundVolume, settings.soundHalfwayFinal, settings.soundOffTargetNudge, isRampTest, ftp, intensityAdjust]);
@@ -3859,6 +3870,15 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
         }
         stepSamplesRef.current = [];
         underPowerStreakRef.current = 0;
+      }
+      if (workout.ftpTestLabel && intervals[currentIndex].label === workout.ftpTestLabel) {
+        const avg = avgOf(ftpTestSamplesRef.current);
+        if (avg != null) {
+          const mult = workout.ftpMultiplier || 0.95;
+          const estimate = Math.round(avg * mult);
+          setTestResult({ ftp: estimate, auto: false, resultLabel: `${workout.name} complete` });
+          if (onSaveFtpResult) onSaveFtpResult(estimate, workout.name);
+        }
       }
       const next = currentIndex + 1;
       setCurrentIndex(next);
@@ -3894,6 +3914,15 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
           const mult = workout.ftpMultiplier || 0.75;
           const estimate = Math.round(avg * mult);
           setTestResult({ ftp: estimate, auto: false });
+          if (onSaveFtpResult) onSaveFtpResult(estimate, workout.name);
+        }
+      }
+      if (workout.ftpTestLabel && intervals[currentIndex].label === workout.ftpTestLabel) {
+        const avg = avgOf(ftpTestSamplesRef.current);
+        if (avg != null) {
+          const mult = workout.ftpMultiplier || 0.95;
+          const estimate = Math.round(avg * mult);
+          setTestResult({ ftp: estimate, auto: false, resultLabel: `${workout.name} complete` });
           if (onSaveFtpResult) onSaveFtpResult(estimate, workout.name);
         }
       }
@@ -3953,6 +3982,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
     setTestResult(null);
     setFtpApplied(false);
     stepSamplesRef.current = [];
+    ftpTestSamplesRef.current = [];
     underPowerStreakRef.current = 0;
     offTargetStreakRef.current = 0;
   }
@@ -3962,6 +3992,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
     setTestResult(null);
     setFtpApplied(false);
     stepSamplesRef.current = [];
+    ftpTestSamplesRef.current = [];
     lastStepAvgRef.current = null;
     underPowerStreakRef.current = 0;
     offTargetStreakRef.current = 0;
@@ -4095,7 +4126,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       <div className="player-main" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
         <div className="player-stats" style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: FONT_BODY, fontSize: 13, color: isDone ? SUB : z.color, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
-            {isDone ? (testResult ? (testResult.auto ? 'Test ended — that’s your limit' : 'Ramp test complete') : 'Workout complete') : (current.label || z.name)}
+            {isDone ? (testResult ? (testResult.resultLabel || (testResult.auto ? 'Test ended — that’s your limit' : 'Ramp test complete')) : 'Workout complete') : (current.label || z.name)}
           </div>
 
           {!isDone ? (
