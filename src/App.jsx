@@ -4896,6 +4896,23 @@ function PaywallView({ blocking, trialExpired, onClose, onLogout, userId, email 
   return <div style={{ minHeight: '100%', background: BG, padding: '20px 20px 40px', fontFamily: 'Inter, sans-serif' }}>{body}</div>;
 }
 
+// ---------- loading screen (random rider gif, picked once per mount) ----------
+const LOADING_GIFS = [
+  '/images/loading/loading-1.gif',
+  '/images/loading/loading-2.gif',
+  '/images/loading/loading-3.gif',
+  '/images/loading/loading-4.gif',
+  '/images/loading/loading-5.gif',
+];
+function LoadingView() {
+  const [gif] = useState(() => LOADING_GIFS[Math.floor(Math.random() * LOADING_GIFS.length)]);
+  return (
+    <div style={{ minHeight: '100%', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <img src={gif} alt="" width={128} height={128} style={{ imageRendering: 'pixelated' }} />
+    </div>
+  );
+}
+
 function DeviceLimitView({ onLogout }) {
   return (
     <div style={{ minHeight: '100%', background: BG, padding: '20px 20px 40px', fontFamily: 'Inter, sans-serif', display: 'flex', alignItems: 'center' }}>
@@ -5578,7 +5595,7 @@ export default function App() {
   }
 
   if (authLoading) {
-    return <div style={wrapStyle}><style>{globalStyle}</style></div>;
+    return <div style={wrapStyle}><style>{globalStyle}</style><LoadingView /></div>;
   }
 
   // ---- arrived via a "reset your password" email link ----
@@ -5614,7 +5631,7 @@ export default function App() {
   }
 
   if (profileLoading || !profile) {
-    return <div style={wrapStyle}><style>{globalStyle}</style></div>;
+    return <div style={wrapStyle}><style>{globalStyle}</style><LoadingView /></div>;
   }
 
   const account = { name: profile.name || user.user_metadata?.name || 'Rider', email: user.email };
