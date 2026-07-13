@@ -5334,7 +5334,7 @@ export default function App() {
     + " @keyframes confetti-fall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(420px) rotate(600deg); opacity: 0; } }"
     // gentle bounce drawing a first-time demo visitor's eye to the intensity dial
     + " @keyframes demo-tag-bounce { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-4px); } }";
-  const wrapStyle = { '--accent': theme.accent || settings.accentColor, ...themeVars, background: BG, minHeight: '100%', fontFamily: 'Inter, sans-serif' };
+  const wrapStyle = { '--accent': theme.accent || settings.accentColor, ...themeVars, background: BG, minHeight: '100%', fontFamily: 'Inter, sans-serif', colorScheme: settings.theme === 'dark' ? 'dark' : 'light' };
 
   // ---- public demo ride: no account needed, takes priority over auth ----
   if (demoMode) {
