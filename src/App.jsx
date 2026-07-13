@@ -2438,8 +2438,8 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
   const needsFtp = scaledIntervals.some(i => i.type === 'power');
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 40, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: BG, width: '100%', maxWidth: 520, borderRadius: '18px 18px 0 0', border: `1px solid ${LINE}`, borderBottom: 'none', padding: 20, paddingBottom: 'calc(20px + env(safe-area-inset-bottom))', maxHeight: 'min(85vh, calc(100dvh - 24px))', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', boxSizing: 'border-box' }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: BG, width: '100%', maxWidth: 520, borderRadius: 18, border: `1px solid ${LINE}`, padding: 20, maxHeight: 'min(85vh, calc(100dvh - 48px))', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
           <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{workout.name}</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: SUB, cursor: 'pointer' }}><X size={22} /></button>
@@ -4760,8 +4760,8 @@ function PaywallView({ blocking, trialExpired, onClose, onLogout, userId, email 
 
   if (!blocking) {
     return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-        <div onClick={e => e.stopPropagation()} style={{ background: BG, width: '100%', maxWidth: 520, borderRadius: '18px 18px 0 0', border: `1px solid ${LINE}`, borderBottom: 'none', padding: '10px 20px 24px', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))', maxHeight: 'min(90vh, calc(100dvh - 24px))', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', boxSizing: 'border-box' }} onClick={onClose}>
+        <div onClick={e => e.stopPropagation()} style={{ background: BG, width: '100%', maxWidth: 520, borderRadius: 18, border: `1px solid ${LINE}`, padding: '10px 20px 24px', maxHeight: 'min(90vh, calc(100dvh - 48px))', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {body}
         </div>
       </div>
