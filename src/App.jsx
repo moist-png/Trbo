@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Play, Pause, SkipForward, SkipBack, RotateCcw, X, Plus, Trash2, ChevronUp, ChevronDown, ChevronRight,
   Search, Library, Wrench, Gauge, Save, Edit3, Copy, Settings as SettingsIcon, Bluetooth,
@@ -14,6 +14,7 @@ import { MiniGamesView, MiniGamePlayer, BEAT_THE_PROS } from './MiniGames';
 import {
   isNative, nativeRequestAndConnect, nativeStartNotifications, nativeWrite, nativeDisconnect, uuid16,
 } from './nativeBle';
+import { ColorblindContext } from './colorblindContext';
 
 // ---------- palette ----------
 // TEXT/SUB/PANEL/PANEL2/LINE/RED/BG/MUTED resolve through CSS custom
@@ -94,6 +95,7 @@ const DEFAULT_SETTINGS = {
   visualProgressRing: true,
   visualPowerGauge: true,
   visualCelebration: true,
+  colorblindMode: false,
 };
 
 // ---------- account / trial / billing ----------
@@ -128,29 +130,50 @@ function daysLeftInTrial(trialStart) {
 }
 function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
-const ZONE_FREE = { color: '#4B5563', name: 'Free' };
-function zoneFor(interval) {
-  if (interval.type === 'free') return { ...ZONE_FREE, intensity: 0.16 };
+// Zone colour palettes for the six training zones (see ZONE_COLORS below).
+// The ColorblindContext itself lives in colorblindContext.js so it can be
+// shared with PlannerView.jsx without a circular import. The default set climbs
+// blue -> teal -> green -> yellow-green -> orange -> red, which is a
+// beautiful gradient with normal vision but collapses into a near-identical
+// yellow/brown smear for red-green colour blindness (the most common form,
+// affecting roughly 1 in 12 men) — Tempo, Threshold, VO2 Max and Anaerobic
+// become very hard to tell apart at a glance. The "colorblind" set swaps in
+// an Okabe-Ito-derived palette chosen so every zone stays distinguishable
+// under protanopia, deuteranopia, and (reasonably) tritanopia, while keeping
+// the same low-to-high intensity ordering.
+const ZONE_COLORS = {
+  standard: {
+    Recovery: '#4A6FA5', Endurance: '#4FB8A6', Tempo: '#8FC93A',
+    Threshold: '#C9F031', 'VO2 Max': '#FF9F40', Anaerobic: '#FF4D4D', Free: '#4B5563',
+  },
+  colorblind: {
+    Recovery: '#0072B2', Endurance: '#56B4E9', Tempo: '#009E73',
+    Threshold: '#E69F00', 'VO2 Max': '#D55E00', Anaerobic: '#CC79A7', Free: '#4B5563',
+  },
+};
+function zoneFor(interval, cvd) {
+  const palette = cvd ? ZONE_COLORS.colorblind : ZONE_COLORS.standard;
+  if (interval.type === 'free') return { color: palette.Free, name: 'Free', intensity: 0.16 };
   if (interval.type === 'power') {
     const p = interval.target;
-    let z;
-    if (p <= 55) z = { color: '#4A6FA5', name: 'Recovery' };
-    else if (p <= 75) z = { color: '#4FB8A6', name: 'Endurance' };
-    else if (p <= 90) z = { color: '#8FC93A', name: 'Tempo' };
-    else if (p <= 105) z = { color: '#C9F031', name: 'Threshold' };
-    else if (p <= 120) z = { color: '#FF9F40', name: 'VO2 Max' };
-    else z = { color: '#FF4D4D', name: 'Anaerobic' };
-    return { ...z, intensity: Math.min(1.3, p / 150) };
+    let name;
+    if (p <= 55) name = 'Recovery';
+    else if (p <= 75) name = 'Endurance';
+    else if (p <= 90) name = 'Tempo';
+    else if (p <= 105) name = 'Threshold';
+    else if (p <= 120) name = 'VO2 Max';
+    else name = 'Anaerobic';
+    return { color: palette[name], name, intensity: Math.min(1.3, p / 150) };
   }
   const r = interval.target;
-  let z;
-  if (r <= 2) z = { color: '#4A6FA5', name: 'Recovery' };
-  else if (r <= 4) z = { color: '#4FB8A6', name: 'Endurance' };
-  else if (r <= 6) z = { color: '#8FC93A', name: 'Tempo' };
-  else if (r === 7) z = { color: '#C9F031', name: 'Threshold' };
-  else if (r <= 9) z = { color: '#FF9F40', name: 'VO2 Max' };
-  else z = { color: '#FF4D4D', name: 'Anaerobic' };
-  return { ...z, intensity: r / 10 };
+  let name;
+  if (r <= 2) name = 'Recovery';
+  else if (r <= 4) name = 'Endurance';
+  else if (r <= 6) name = 'Tempo';
+  else if (r === 7) name = 'Threshold';
+  else if (r <= 9) name = 'VO2 Max';
+  else name = 'Anaerobic';
+  return { color: palette[name], name, intensity: r / 10 };
 }
 
 // A distinct musical note per zone so a rider can hear what's coming next
@@ -2160,11 +2183,12 @@ function useHeartRate() {
 
 // ---------- profile chart ----------
 function ProfileChart({ intervals, height = 84, progress = null }) {
+  const cvd = useContext(ColorblindContext);
   const total = totalDuration(intervals) || 1;
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', height, width: '100%', background: PANEL2, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}` }}>
       {intervals.map((it) => {
-        const z = zoneFor(it);
+        const z = zoneFor(it, cvd);
         const w = (it.duration / total) * 100;
         const h = Math.max(14, Math.min(100, z.intensity * 78));
         const isFree = it.type === 'free';
@@ -2192,7 +2216,7 @@ const TIMELINE_PX_PER_SEC = 1.2;    // zoom level: bigger = more zoomed in
 const TIMELINE_FOLLOW_RATIO = 0.24; // keeps "now" ~a quarter of the way across the visible window
 const TIMELINE_RESUME_MS = 10000;   // delay after a manual scroll before auto-follow kicks back in
 
-function LiveTimeline({ intervals, elapsed, total }) {
+function LiveTimeline({ intervals, elapsed, total, cvd }) {
   const scrollRef = useRef(null);
   const resumeTimerRef = useRef(null);
   const [following, setFollowing] = useState(true);
@@ -2237,7 +2261,7 @@ function LiveTimeline({ intervals, elapsed, total }) {
       >
         <div style={{ position: 'relative', width: totalWidth, height: 48, display: 'flex', alignItems: 'flex-end' }}>
           {intervals.map((it) => {
-            const z = zoneFor(it);
+            const z = zoneFor(it, cvd);
             const w = it.duration * TIMELINE_PX_PER_SEC;
             const h = Math.max(14, Math.min(100, z.intensity * 78));
             const isFree = it.type === 'free';
@@ -2279,13 +2303,21 @@ function ProgressRing({ progress, color, size = 190 }) {
 }
 
 // A compact semicircular gauge comparing live power against the current
-// interval's target — green near target, blue under, red over.
-function PowerGauge({ power, targetWatts, width, height, radius, stroke: strokeProp }) {
+// interval's target — a "good" colour near target, blue under, a distinct
+// "hot" colour over. The two non-blue colours are swapped for a colourblind
+// -safe pair (bluish-green / vermillion) when cvd is true, since the default
+// green/red pairing is the hardest one to tell apart under red-green colour
+// blindness — exactly the two states (on target vs. overshooting) a rider
+// most needs to distinguish at a glance mid-effort.
+function PowerGauge({ power, targetWatts, width, height, radius, stroke: strokeProp, cvd }) {
   const w = width || 148, h = height || 82, r = radius || 64, stroke = strokeProp || 11;
   const path = `M ${w / 2 - r} ${h} A ${r} ${r} 0 0 1 ${w / 2 + r} ${h}`;
   const ratio = targetWatts > 0 ? power / targetWatts : 0;
   const fillPct = Math.max(0, Math.min(100, (power / (targetWatts * 1.4 || 1)) * 100));
-  const color = targetWatts <= 0 ? 'var(--accent)' : ratio < 0.85 ? '#4A6FA5' : ratio > 1.15 ? '#FF4D4D' : '#8FC93A';
+  const underColor = cvd ? '#0072B2' : '#4A6FA5';
+  const onTargetColor = cvd ? '#009E73' : '#8FC93A';
+  const overColor = cvd ? '#D55E00' : '#FF4D4D';
+  const color = targetWatts <= 0 ? 'var(--accent)' : ratio < 0.85 ? underColor : ratio > 1.15 ? overColor : onTargetColor;
   return (
     <div style={{ position: 'relative', width: w, height: h + 4 }}>
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
@@ -2548,7 +2580,7 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
 
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
           {scaledIntervals.map((it) => {
-            const z = zoneFor(it);
+            const z = zoneFor(it, settings.colorblindMode);
             return (
               <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '6px 8px', background: PANEL, borderRadius: 6 }}>
                 <div style={{ width: 4, height: 24, background: z.color, borderRadius: 2, flexShrink: 0 }} />
@@ -3228,7 +3260,8 @@ const QUICK_BLOCKS = [
 ];
 
 function IntervalRow({ interval, onChange, onDelete, onMoveUp, onMoveDown, onDuplicate, first, last }) {
-  const z = zoneFor(interval);
+  const cvd = useContext(ColorblindContext);
+  const z = zoneFor(interval, cvd);
   const mins = Math.floor(interval.duration / 60);
   const secs = interval.duration % 60;
   return (
@@ -3940,7 +3973,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
     if (timeLeft >= 0) return;
     if (currentIndex < intervals.length - 1) {
       if (settings.soundIntervalBeep) {
-        const upcomingZone = zoneFor(intervals[currentIndex + 1]);
+        const upcomingZone = zoneFor(intervals[currentIndex + 1], settings.colorblindMode);
         if (upcomingZone.name === 'Recovery') {
           // Recovery gets its own dedicated, softer descending cue —
           // always, regardless of the per-zone pitch setting below.
@@ -4127,7 +4160,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const displayCurrent = (current.type === 'power' && intensityAdjust !== 1)
     ? { ...current, target: Math.round(current.target * intensityAdjust) }
     : current;
-  const z = zoneFor(displayCurrent);
+  const z = zoneFor(displayCurrent, settings.colorblindMode);
   const total = totalDuration(intervals);
   const elapsedBefore = totalDuration(intervals.slice(0, currentIndex));
   const elapsed = elapsedBefore + (current.duration - Math.max(0, timeLeft));
@@ -4256,7 +4289,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
 
           {!isDone && settings.visualPowerGauge && trainer.status === 'connected' && current.type === 'power' && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: isPortrait ? 18 : 6 }}>
-              <PowerGauge power={trainer.power || 0} targetWatts={targetWattsForGauge} width={gaugeSize.width} height={gaugeSize.height} radius={gaugeSize.radius} stroke={gaugeSize.stroke} />
+              <PowerGauge power={trainer.power || 0} targetWatts={targetWattsForGauge} width={gaugeSize.width} height={gaugeSize.height} radius={gaugeSize.radius} stroke={gaugeSize.stroke} cvd={settings.colorblindMode} />
             </div>
           )}
 
@@ -4374,7 +4407,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
       </div>
 
       <div style={{ flexShrink: 0, marginTop: 14 }}>
-        <LiveTimeline intervals={intervals} elapsed={elapsed} total={total} />
+        <LiveTimeline intervals={intervals} elapsed={elapsed} total={total} cvd={settings.colorblindMode} />
       </div>
 
       {pendingAction && (
@@ -4400,9 +4433,13 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
 // ---------- settings view ----------
 function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate, customWorkouts, onResetCustom, ftpHistory, onClearFtpHistory, onClose, account, daysLeft, subscribed, compAccess, onLogout, onShowPaywall, ownerStats, stravaConnected, onConnectStrava, onDisconnectStrava }) {
   const [confirmReset, setConfirmReset] = useState(false);
-  const statusColor = trainer.status === 'connected' ? '#8FC93A' : trainer.status === 'connecting' ? '#FF9F40' : trainer.status === 'error' ? RED : SUB;
+  const cvd = settings.colorblindMode;
+  const connectedColor = cvd ? '#009E73' : '#8FC93A';
+  const connectingColor = cvd ? '#E69F00' : '#FF9F40';
+  const errorColor = cvd ? '#CC79A7' : RED;
+  const statusColor = trainer.status === 'connected' ? connectedColor : trainer.status === 'connecting' ? connectingColor : trainer.status === 'error' ? errorColor : SUB;
   const statusLabel = trainer.status === 'connected' ? `Connected · ${trainer.deviceName}` : trainer.status === 'connecting' ? 'Connecting…' : trainer.status === 'error' ? 'Connection failed' : 'Not connected';
-  const hrStatusColor = heartRate.status === 'connected' ? '#8FC93A' : heartRate.status === 'connecting' ? '#FF9F40' : heartRate.status === 'error' ? RED : SUB;
+  const hrStatusColor = heartRate.status === 'connected' ? connectedColor : heartRate.status === 'connecting' ? connectingColor : heartRate.status === 'error' ? errorColor : SUB;
   const hrStatusLabel = heartRate.status === 'connected' ? `Connected · ${heartRate.deviceName}` : heartRate.status === 'connecting' ? 'Connecting…' : heartRate.status === 'error' ? 'Connection failed' : 'Not connected';
 
   return (
@@ -4470,7 +4507,7 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
         <>
           <SectionHeader icon={<LinkIcon size={16} color="var(--accent)" />} title="Strava" />
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: stravaConnected ? '#8FC93A' : SUB, flexShrink: 0 }} />
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: stravaConnected ? connectedColor : SUB, flexShrink: 0 }} />
             <div style={{ fontFamily: "'Manrope', sans-serif", flex: 1, fontSize: 14, color: TEXT }}>{stravaConnected ? 'Connected' : 'Not connected'}</div>
             {stravaConnected ? (
               <button onClick={onDisconnectStrava} style={{ fontFamily: "'Manrope', sans-serif", padding: '7px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13, cursor: 'pointer' }}>Disconnect</button>
@@ -4523,6 +4560,9 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
           <Chip active={settings.theme === 'light'} onClick={() => updateSetting('theme', 'light')}><Sun size={12} style={{ marginRight: 5, verticalAlign: -2 }} />Light</Chip>
         </div>
       </div>
+      <SettingRow label="Colour-blind friendly palette" sub="Swaps zone colours, the live power gauge, and connection status dots for a set that stays distinguishable with red-green colour blindness">
+        <Switch checked={settings.colorblindMode} onChange={v => updateSetting('colorblindMode', v)} />
+      </SettingRow>
       <div style={{ padding: '10px 0', borderBottom: `1px solid ${LINE}` }}>
         <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 14, color: TEXT, marginBottom: 8 }}>Interval targets show as</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -5805,7 +5845,7 @@ export default function App() {
     return (
       <div style={wrapStyle}>
         <style>{globalStyle}</style>
-        <MiniGamePlayer game={activeGame} ftp={ftp} trainer={trainer} heartRate={heartRate} onExit={() => setActiveGame(null)} />
+        <MiniGamePlayer game={activeGame} ftp={ftp} trainer={trainer} heartRate={heartRate} onExit={() => setActiveGame(null)} cvd={settings.colorblindMode} />
       </div>
     );
   }
@@ -5821,6 +5861,7 @@ export default function App() {
   }
 
   return (
+    <ColorblindContext.Provider value={settings.colorblindMode}>
     <div style={{ ...wrapStyle, position: 'relative', ...(isSidebar ? {} : { paddingBottom: 'calc(54px + env(safe-area-inset-bottom))' }) }}>
       <style>{globalStyle}</style>
       <OrientationGate preferredOrientation={settings.preferredOrientation}>
@@ -5875,5 +5916,6 @@ export default function App() {
         {!isSidebar && <BottomTabBar view={view} onNavigate={handleNavigate} />}
       </OrientationGate>
     </div>
+    </ColorblindContext.Provider>
   );
 }

@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useContext } from 'react';
 import { CalendarDays, ChevronRight, ChevronDown, ChevronUp, Play, RefreshCw, Trash2, Target, Flag, TrendingUp, Check, X } from 'lucide-react';
 import {
   GOALS, PHASE, PURPOSE_LABEL, WORKOUT_PURPOSE,
   generatePlan, validatePlan, swapOptionsForPurpose, swapDayWorkout, applyCheckin,
   estimateWorkoutTss, currentPlanWeek, isPlanComplete, changePlanDaysPerWeek,
 } from './planner';
+import { ColorblindContext } from './colorblindContext';
 
 // Shared style tokens (mirror App.jsx so the planner blends in seamlessly).
 const INK = '#14171A';
@@ -25,9 +26,15 @@ function fmtLong(sec) {
   return `${m} min`;
 }
 
-// A small colour per phase so the week list reads at a glance.
+// A small colour per phase so the week list reads at a glance. The
+// colourblind set keeps the same low-to-high intensity ordering (taper is
+// the easiest phase, peak the hardest) using the same Okabe-Ito-derived
+// hues as the zone colours in App.jsx.
 const PHASE_COLOR = {
   base: '#4FB8A6', build: '#C9F031', peak: '#FF9F40', taper: '#4A6FA5',
+};
+const PHASE_COLOR_CVD = {
+  base: '#56B4E9', build: '#E69F00', peak: '#D55E00', taper: '#0072B2',
 };
 
 // ---------------------------------------------------------------------------
@@ -177,8 +184,9 @@ function DayRow({ day, library, onOpen, onSwap }) {
 // ---------------------------------------------------------------------------
 function WeekCard({ week, library, defaultOpen, isCurrent, cardRef, onOpen, onSwap, onCheckin }) {
   const [open, setOpen] = useState(defaultOpen);
+  const cvd = useContext(ColorblindContext);
   const phaseInfo = PHASE[week.phase];
-  const phaseColor = PHASE_COLOR[week.phase] || SUB;
+  const phaseColor = (cvd ? PHASE_COLOR_CVD : PHASE_COLOR)[week.phase] || SUB;
 
   return (
     <div ref={cardRef} style={{ background: PANEL, border: `1px solid ${isCurrent ? 'var(--accent)' : LINE}`, borderRadius: 14, marginBottom: 12, overflow: 'hidden', scrollMarginTop: 12 }}>
@@ -436,6 +444,8 @@ function ArchiveList({ plans, onDelete }) {
 // Little bar chart of weekly load across the whole plan — makes the
 // periodization (ramps, deloads, taper) visible at a glance.
 function PlanLoadChart({ weeks }) {
+  const cvd = useContext(ColorblindContext);
+  const colors = cvd ? PHASE_COLOR_CVD : PHASE_COLOR;
   const max = Math.max(1, ...weeks.map(w => w.plannedTss));
   return (
     <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
@@ -443,14 +453,14 @@ function PlanLoadChart({ weeks }) {
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 64 }}>
         {weeks.map(w => (
           <div key={w.weekNumber} title={`Week ${w.weekNumber}: ~${w.plannedTss} TSS`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
-            <div style={{ width: '100%', maxWidth: 20, height: `${Math.max(4, (w.plannedTss / max) * 100)}%`, borderRadius: 3, background: PHASE_COLOR[w.phase] || SUB, opacity: w.isRecovery ? 0.45 : 1 }} />
+            <div style={{ width: '100%', maxWidth: 20, height: `${Math.max(4, (w.plannedTss / max) * 100)}%`, borderRadius: 3, background: colors[w.phase] || SUB, opacity: w.isRecovery ? 0.45 : 1 }} />
           </div>
         ))}
       </div>
       <div style={{ display: 'flex', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
         {Object.entries(PHASE).map(([key, p]) => (
           <div key={key} style={{ fontFamily: FONT_BODY, display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: SUB }}>
-            <div style={{ width: 9, height: 9, borderRadius: 2, background: PHASE_COLOR[key] }} /> {p.label}
+            <div style={{ width: 9, height: 9, borderRadius: 2, background: colors[key] }} /> {p.label}
           </div>
         ))}
       </div>

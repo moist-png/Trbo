@@ -479,7 +479,7 @@ const prosGame = {
   },
   betterScore(a, b) { return a > b; },
   formatScore(v) { return fmtTime(v); },
-  Render({ state, power }) {
+  Render({ state, power, cvd }) {
     const target = state.variant.watts;
     const cur = Math.round(state.curTarget);
     const inHold = state.phase === 'hold';
@@ -489,6 +489,8 @@ const prosGame = {
     const rolling = Math.round(state.avg);
     const onPace = inHold ? rolling >= target * 0.92 : true;
     const remaining = state.variant.seconds - state.holdElapsed;
+    const paceColor = cvd ? '#009E73' : '#C9F031';
+    const dangerColor = cvd ? '#D55E00' : '#FF6B4A';
 
     let banner, sub, bannerBg, bannerInk;
     if (state.phase === 'lead') {
@@ -498,13 +500,13 @@ const prosGame = {
     } else if (state.phase === 'ramp') {
       banner = `RAMPING UP \u00b7 ${cur}W`;
       sub = 'Wind it up smoothly toward pro power\u2026';
-      bannerBg = '#FF9F40'; bannerInk = INK;
+      bannerBg = cvd ? '#E69F00' : '#FF9F40'; bannerInk = INK;
     } else {
       banner = `HOLD ${target}W`;
       sub = onPace
         ? 'On pro pace. This is what they feel like the whole race.'
         : (state.below > 0 ? `Below pro pace — ${Math.ceil(8 - state.below)}s before you blow!` : 'Lift it back to pro power!');
-      bannerBg = onPace ? '#C9F031' : '#FF6B4A'; bannerInk = INK;
+      bannerBg = onPace ? paceColor : dangerColor; bannerInk = INK;
     }
 
     return (
@@ -514,8 +516,8 @@ const prosGame = {
           {banner}
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <StatChip label={inHold ? 'Pro target' : 'Follow'} value={`${inHold ? target : cur}W`} color="#C9F031" />
-          <StatChip label={inHold ? 'You (5s avg)' : 'You'} value={`${inHold ? rolling : power}W`} color={onPace ? 'var(--accent)' : '#FF6B4A'} />
+          <StatChip label={inHold ? 'Pro target' : 'Follow'} value={`${inHold ? target : cur}W`} color={paceColor} />
+          <StatChip label={inHold ? 'You (5s avg)' : 'You'} value={`${inHold ? rolling : power}W`} color={onPace ? 'var(--accent)' : dangerColor} />
           <StatChip label={inHold ? 'To go' : 'Effort'} value={inHold ? fmtTime(remaining) : fmtTime(state.variant.seconds)} />
         </div>
         <div style={{ position: 'relative', width: '100%', maxWidth: 380, height: 44, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, overflow: 'hidden' }}>
@@ -589,7 +591,7 @@ export function MiniGamesView({ onPlay }) {
 // =============================================================================
 // Game player — full-screen host that runs whichever game is selected
 // =============================================================================
-export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit }) {
+export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit, cvd }) {
   const [phase, setPhase] = useState('intro'); // intro | countdown | playing | done
   const [variant, setVariant] = useState(game.variants ? game.variants[0] : null);
   const [countdown, setCountdown] = useState(3);
@@ -827,7 +829,7 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit }) {
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', width: '100%', maxWidth: 520, margin: '0 auto' }}>
-        {s && <game.Render state={s} power={Math.round(power)} ftp={ftp} />}
+        {s && <game.Render state={s} power={Math.round(power)} ftp={ftp} cvd={cvd} />}
       </div>
 
       {simMode && trainer.status !== 'connected' && (
