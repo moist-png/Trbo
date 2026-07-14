@@ -671,7 +671,14 @@ const LIBRARY = [
   {
     id: 'rpe-fartlek', name: 'Fartlek surges', category: 'Basics',
     description: 'Short surges and easy settles, back to back — the trainer holds the effort, you just ride.',
-    intervals: [iv('Easy spin', 300, 'rpe', 3), iv('Build', 180, 'rpe', 6), iv('Push', 120, 'rpe', 8), iv('Recover', 120, 'rpe', 2), iv('Hard', 240, 'rpe', 7), iv('Sprint', 60, 'rpe', 9), iv('Easy', 300, 'rpe', 3), iv('Cool down', 300, 'rpe', 2)],
+    intervals: [
+      iv('Easy spin', 300, 'rpe', 3), iv('Build', 180, 'rpe', 6),
+      ...repeatIv(2, (i) => [
+        iv('Push', 120, 'rpe', 8), iv('Recover', 120, 'rpe', 2), iv('Hard', 240, 'rpe', 7), iv('Sprint', 20, 'rpe', 10),
+        ...(i === 0 ? [iv('Recover', 100, 'rpe', 2)] : []),
+      ]),
+      iv('Easy', 300, 'rpe', 3), iv('Cool down', 300, 'rpe', 2),
+    ],
   },
   {
     id: 'recovery-spin', name: 'Recovery spin', category: 'Basics',
@@ -686,7 +693,7 @@ const LIBRARY = [
   {
     id: 'mixed-metric', name: 'Mixed metric session', category: 'Basics',
     description: 'Structured power intervals mixed with effort-based surges — always something to push against.',
-    intervals: [iv('Warm up', 480, 'power', 60), iv('Sweet spot', 600, 'power', 90), iv('Ride how you feel', 300, 'rpe', 4), iv('Hard effort', 240, 'rpe', 8), iv('Sprint', 30, 'rpe', 10), iv('Recovery', 90, 'power', 50), iv('Endurance', 600, 'power', 70), iv('Cool down', 360, 'power', 50)],
+    intervals: [iv('Warm up', 480, 'power', 60), iv('Sweet spot', 600, 'power', 90), iv('Recovery', 300, 'power', 50), iv('Hard effort', 240, 'rpe', 8), iv('Sprint', 30, 'rpe', 10), iv('Recovery', 90, 'power', 50), iv('Endurance', 600, 'power', 70), iv('Cool down', 360, 'power', 50)],
   },
   {
     id: 'vo2-40-20-double', name: 'VO2 max 40/20 × 13 (2 sets)', category: 'Basics',
