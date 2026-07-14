@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import PlannerView from './PlannerView';
-import { currentPlanWeek, PHASE } from './planner';
+import { currentPlanWeek, PHASE, WORKOUT_PURPOSE } from './planner';
 import { TrboMark } from './PublicPages';
 import { MiniGamesView, MiniGamePlayer, BEAT_THE_PROS } from './MiniGames';
 import {
@@ -1949,6 +1949,22 @@ const LIBRARY = [
 ];
 const CATEGORIES = ['All', 'Rides', 'Basics', 'Recovery', 'Endurance', 'Tempo', 'Sweet Spot', 'Threshold', 'VO2 Max', 'FTP Test'];
 
+// Training-type filter chips (Recovery/Endurance/Tempo/.../FTP Test) need to
+// match a workout's real training purpose, not its top-level category --
+// every built-in library workout is tagged 'Rides' or 'Basics' at that top
+// level, with the actual training type living in WORKOUT_PURPOSE (planner.js)
+// instead. Tempo and Sweet Spot intentionally share one purpose bucket
+// ('tempo') since the workout data doesn't currently distinguish them.
+const CATEGORY_TO_PURPOSE = {
+  'Recovery': 'recovery',
+  'Endurance': 'endurance',
+  'Tempo': 'tempo',
+  'Sweet Spot': 'tempo',
+  'Threshold': 'threshold',
+  'VO2 Max': 'vo2max',
+  'FTP Test': 'test',
+};
+
 // ---------- audio ----------
 function useBeeper() {
   const ctxRef = useRef(null);
@@ -3129,8 +3145,19 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
   const all = useMemo(() => {
     const withFlag = LIBRARY.map(w => ({ ...w, custom: false })).concat(customWorkouts.map(w => ({ ...w, custom: true })));
     const activeCat = lockedCategory || cat;
-    const list = withFlag.filter(w => (activeCat === 'All' || activeCat === 'Custom' ? true : w.category === activeCat) && (activeCat !== 'Custom' || w.custom))
-      .filter(w => w.name.toLowerCase().includes(query.toLowerCase()));
+    const purpose = CATEGORY_TO_PURPOSE[activeCat];
+    const list = withFlag.filter(w => {
+      if (activeCat === 'All') return true;
+      if (activeCat === 'Custom') return w.custom;
+      if (purpose) {
+        // Built-ins: match their real tagged purpose. Custom workouts have
+        // no entry in WORKOUT_PURPOSE (it's keyed by fixed library ids), so
+        // fall back to whatever category the builder saved on them directly.
+        const wPurpose = WORKOUT_PURPOSE[w.id];
+        return wPurpose ? wPurpose === purpose : w.category === activeCat;
+      }
+      return w.category === activeCat; // Rides / Basics
+    }).filter(w => w.name.toLowerCase().includes(query.toLowerCase()));
     if (sort === 'default') return list;
     const withMeta = list.map(w => ({ w, dur: totalDuration(w.intervals), intensity: workoutIntensity(w), starred: starredIds.has(w.id) ? 1 : 0 }));
     const cmp = {
