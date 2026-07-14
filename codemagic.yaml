@@ -36,7 +36,9 @@ workflows:
       - name: Add certificate to keychain
         script: keychain add-certificates
       - name: Apply signing files to Xcode project
-        script: xcode-project use-profiles
+        script: |
+          xcode-project use-profiles \
+            --custom-export-options='{"testFlightInternalTestingOnly": true}'
       - name: Bump build number
         script: |
           cd ios/App
