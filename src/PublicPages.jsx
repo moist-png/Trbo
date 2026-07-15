@@ -134,7 +134,7 @@ export function PricingPage() {
         <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: COLOR.muted, margin: '0 0 20px' }}>Simple, single-tier pricing. Cancel anytime.</p>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
           <PriceCard label="Monthly" price="US$5.99" sub="per month" />
-          <PriceCard label="Annual" price="US$65.89" sub="per year" note="11 months paid upfront, 12th free" highlight />
+          <PriceCard label="Annual" price="US$65.99" sub="per year" note="11 months paid upfront, 12th free" highlight />
         </div>
 
         <div style={{ marginTop: 22, background: COLOR.panel, border: `1px solid ${COLOR.hairline}`, borderRadius: 14, padding: '16px 18px' }}>

@@ -106,7 +106,7 @@ const DEFAULT_SETTINGS = {
 // in-app purchase if you distribute through their app stores).
 const TRIAL_DAYS = 7;
 const MONTHLY_PRICE_LABEL = '$5.99 / month';
-const ANNUAL_PRICE_LABEL = '$65.89 / year'; // keep in sync with ANNUAL_PRICE_CENTS in api/create-checkout-session.js
+const ANNUAL_PRICE_LABEL = '$65.99 / year'; // keep in sync with the STRIPE_PRICE_ANNUAL price in the Stripe Dashboard
 // New account creation is paused app-wide until Trbo formally relaunches (marketing
 // funnel, native testing, and the EU/UK Article 27 representative decision all need
 // to land together — see /pricing page and TRBO_MINIMAL_PAGE_HANDOVER.md). Existing
