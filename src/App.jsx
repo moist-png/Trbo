@@ -5321,6 +5321,70 @@ function OrientationGate({ preferredOrientation, children }) {
   );
 }
 
+// ---------- desktop install hint (shown once, ever) ----------
+// Chrome/Edge (and other Chromium browsers) fire `beforeinstallprompt` when
+// the current page qualifies for installation as an app. That event only
+// exists in browsers that actually put an install icon in the address bar,
+// so gating the hint on it — rather than guessing from screen width or
+// user agent — means it only ever shows to people who can actually act on
+// it. It never fires at all inside the native iOS/Android shell, or in a
+// browser tab that's already running as an installed PWA.
+const INSTALL_HINT_SEEN_KEY = 'trbo_install_hint_seen_v1';
+function useInstallHint() {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(INSTALL_HINT_SEEN_KEY) === '1'; } catch (e) { return false; }
+  });
+
+  useEffect(() => {
+    if (isNative || dismissed) return;
+    function handler(e) {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    }
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, [dismissed]);
+
+  function dismiss() {
+    setDismissed(true);
+    setDeferredPrompt(null);
+    try { localStorage.setItem(INSTALL_HINT_SEEN_KEY, '1'); } catch (e) {}
+  }
+
+  async function install() {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try { await deferredPrompt.userChoice; } catch (e) {}
+    dismiss();
+  }
+
+  return { show: !!deferredPrompt && !dismissed, dismiss, install };
+}
+
+function InstallHintToast({ onDismiss, onInstall }) {
+  return (
+    <div style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 40, width: 300, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: '14px 16px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <Download size={16} color="var(--accent)" style={{ marginTop: 2, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: TEXT, marginBottom: 4 }}>Install Trbo as a desktop app</div>
+          <div style={{ fontSize: 12, color: SUB, lineHeight: 1.5 }}>
+            Look for the install icon in your browser's address bar — or just click Install below.
+          </div>
+          <div style={{ display: 'flex', gap: 14, marginTop: 10, alignItems: 'center' }}>
+            <button onClick={onInstall} style={{ background: 'var(--accent)', border: 'none', color: INK, fontWeight: 700, fontSize: 12, borderRadius: 999, padding: '6px 14px', cursor: 'pointer' }}>Install</button>
+            <button onClick={onDismiss} style={{ background: 'none', border: 'none', color: SUB, fontSize: 12, cursor: 'pointer' }}>Not now</button>
+          </div>
+        </div>
+        <button onClick={onDismiss} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: SUB, cursor: 'pointer', padding: 0, flexShrink: 0 }}>
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------- primary navigation (responsive) ----------
 // Portrait phone keeps the classic bottom tab bar. Landscape phone, tablet,
 // and laptop get a persistent left sidebar instead — fixes the old bottom
@@ -5523,6 +5587,7 @@ export default function App() {
   ));
   const trainer = useTrainer();
   const heartRate = useHeartRate();
+  const installHint = useInstallHint();
 
   // Keep the browser/OS chrome (e.g. the address bar tint on mobile) in
   // sync with whichever theme is active, not just the in-page colors.
@@ -6187,6 +6252,8 @@ export default function App() {
         )}
 
         {!isSidebar && <BottomTabBar view={view} onNavigate={handleNavigate} />}
+
+        {installHint.show && <InstallHintToast onDismiss={installHint.dismiss} onInstall={installHint.install} />}
       </OrientationGate>
     </div>
     </ColorblindContext.Provider>
