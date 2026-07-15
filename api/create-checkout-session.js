@@ -1,13 +1,33 @@
 // This runs on Vercel's servers, never in the user's browser \u2014 that's why
 // it's allowed to use the Stripe *secret* key (set as an environment
 // variable in the Vercel project settings, never written into this file).
+//
+// Checkout runs through Stripe Managed Payments: Stripe becomes the
+// merchant of record and handles sales tax/VAT/GST calculation, collection,
+// and remittance in ~80 countries on our behalf. That means:
+//   1. Prices must be pre-created Stripe Price objects (no more building
+//      the price inline with price_data) -- see STRIPE_PRICE_MONTHLY /
+//      STRIPE_PRICE_ANNUAL below.
+//   2. The Checkout Session must be created with managed_payments.enabled
+//      and the preview API version that feature requires.
+//   3. Managed Payments must be turned on for the Stripe account first, at
+//      https://dashboard.stripe.com/settings/managed-payments -- Stripe
+//      runs an eligibility review before it's usable. Until that's done,
+//      Checkout Sessions created with managed_payments.enabled will fail.
 import Stripe from 'stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Keep these two in sync with MONTHLY_PRICE_LABEL / ANNUAL_PRICE_LABEL in src/App.jsx.
-const MONTHLY_PRICE_CENTS = 599; // $5.99/month
-const ANNUAL_PRICE_CENTS = 6589; // $65.89/year (11 months paid upfront, 12th free)
+// The Managed Payments preview version this integration was built against.
+const MANAGED_PAYMENTS_API_VERSION = '2026-02-25.preview';
+
+// Set these in Vercel's project environment variables once the "Trbo
+// Membership" product and its two prices exist in the Stripe Dashboard
+// (Product catalog -> Create product). Price IDs look like price_1AbCdE...
+// Keep the dollar amounts themselves in sync with MONTHLY_PRICE_LABEL /
+// ANNUAL_PRICE_LABEL in src/App.jsx -- $5.99/month, $65.89/year.
+const MONTHLY_PRICE_ID = process.env.STRIPE_PRICE_MONTHLY;
+const ANNUAL_PRICE_ID = process.env.STRIPE_PRICE_ANNUAL;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -22,33 +42,39 @@ export default async function handler(req, res) {
       return;
     }
     const isAnnual = plan === 'annual';
+    const priceId = isAnnual ? ANNUAL_PRICE_ID : MONTHLY_PRICE_ID;
+
+    if (!priceId) {
+      console.error(
+        `Missing ${isAnnual ? 'STRIPE_PRICE_ANNUAL' : 'STRIPE_PRICE_MONTHLY'} environment variable.`
+      );
+      res.status(500).json({ error: 'Checkout is not configured yet. Please try again later.' });
+      return;
+    }
 
     const origin = req.headers.origin || `https://${req.headers.host}`;
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer_email: email,
-      // We stash the Supabase user id here so the webhook knows whose
-      // "profiles" row to mark as subscribed once payment succeeds.
-      client_reference_id: userId,
-      // Lets someone enter a coupon/promotion code on Stripe's checkout page.
-      // Create the actual codes any time in the Stripe Dashboard under
-      // Product catalog -> Coupons -- nothing else here needs to change.
-      allow_promotion_codes: true,
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: { name: isAnnual ? 'Trbo \u2014 Annual plan' : 'Trbo \u2014 Monthly plan' },
-            unit_amount: isAnnual ? ANNUAL_PRICE_CENTS : MONTHLY_PRICE_CENTS,
-            recurring: { interval: isAnnual ? 'year' : 'month' },
-          },
-          quantity: 1,
-        },
-      ],
-      success_url: `${origin}/?checkout=success`,
-      cancel_url: `${origin}/?checkout=cancelled`,
-    });
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: 'subscription',
+        customer_email: email,
+        // We stash the Supabase user id here so the webhook knows whose
+        // "profiles" row to mark as subscribed once payment succeeds.
+        client_reference_id: userId,
+        // Lets someone enter a coupon/promotion code on Stripe's checkout page.
+        // Create the actual codes any time in the Stripe Dashboard under
+        // Product catalog -> Coupons -- nothing else here needs to change.
+        allow_promotion_codes: true,
+        line_items: [{ price: priceId, quantity: 1 }],
+        // Stripe acts as merchant of record: calculates/collects/remits
+        // sales tax, VAT, and GST for us, handles fraud and disputes, and
+        // sends receipts/invoices to the customer directly.
+        managed_payments: { enabled: true },
+        success_url: `${origin}/?checkout=success`,
+        cancel_url: `${origin}/?checkout=cancelled`,
+      },
+      { apiVersion: MANAGED_PAYMENTS_API_VERSION }
+    );
 
     res.status(200).json({ url: session.url });
   } catch (err) {
