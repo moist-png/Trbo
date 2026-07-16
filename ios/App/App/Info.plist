@@ -51,5 +51,7 @@
 	<string>Trbo uses Bluetooth to connect to your smart trainer and heart rate monitor.</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
