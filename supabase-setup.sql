@@ -846,6 +846,37 @@ drop policy if exists "Users can delete own feedback photos" on storage.objects;
 create policy "Users can delete own feedback photos" on storage.objects
   for delete using (bucket_id = 'feedback-photos' and (storage.foldername(name))[1] = auth.uid()::text);
 
+-- 20b. Email sequence system: tracks which lifecycle emails (trial
+--     nudges, the day-8 "why didn't you subscribe" survey, subscriber
+--     retention nudges) have already gone out to whom, so the daily
+--     scheduler in api/email-sequence-cron.js never double-sends. Also
+--     holds survey answers and the opt-out flag every email respects.
+--     Backend-only (service role) -- nobody's browser ever reads or writes
+--     these directly, so RLS stays on with zero policies, same as the
+--     rate_limits table below.
+create table if not exists public.email_sequence_log (
+  id bigint generated always as identity primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  sequence_key text not null,
+  sent_at timestamptz default now(),
+  unique (user_id, sequence_key)
+);
+alter table public.email_sequence_log enable row level security;
+
+create table if not exists public.trial_survey_responses (
+  id bigint generated always as identity primary key,
+  user_id uuid references auth.users(id) on delete cascade not null unique,
+  primary_reason text,
+  followup_detail text,
+  created_at timestamptz default now(),
+  responded_at timestamptz,
+  followup_at timestamptz
+);
+alter table public.trial_survey_responses enable row level security;
+
+alter table public.profiles add column if not exists email_opt_out boolean default false;
+revoke update (email_opt_out) on public.profiles from authenticated;
+
 -- 21. The BEFORE UPDATE trigger in section 6b stops writes to the
 --     credential/billing columns, but does nothing about reads -- Supabase's
 --     default table-wide SELECT grant meant a signed-in person's own
