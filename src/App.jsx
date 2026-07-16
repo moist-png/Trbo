@@ -5282,7 +5282,7 @@ function useAuthLockup() {
 function AuthShell({ children, footer }) {
   const { mark, wordmark } = useAuthLockup();
   return (
-    <div style={{ minHeight: '100%', background: AUTH.bg, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px 20px', fontFamily: AUTH_FONT_BODY }}>
+    <div style={{ minHeight: '100dvh', background: AUTH.bg, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px 20px', fontFamily: AUTH_FONT_BODY }}>
       <div style={{ maxWidth: 340, width: '100%', margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 28 }}>
           <TrboMark size={mark} />

@@ -3,7 +3,8 @@
   "appName": "Trbo",
   "webDir": "dist",
   "ios": {
-    "contentInset": "automatic"
+    "contentInset": "never",
+    "backgroundColor": "#F3EDE3"
   },
   "plugins": {
     "BluetoothLe": {
