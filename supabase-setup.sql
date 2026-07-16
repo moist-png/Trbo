@@ -846,3 +846,25 @@ drop policy if exists "Users can delete own feedback photos" on storage.objects;
 create policy "Users can delete own feedback photos" on storage.objects
   for delete using (bucket_id = 'feedback-photos' and (storage.foldername(name))[1] = auth.uid()::text);
 
+-- 21. The BEFORE UPDATE trigger in section 6b stops writes to the
+--     credential/billing columns, but does nothing about reads -- Supabase's
+--     default table-wide SELECT grant meant a signed-in person's own
+--     browser session could read their own raw Strava tokens and Stripe
+--     customer/subscription IDs directly (e.g. from the browser console),
+--     bypassing the app's own column allowlist in src/App.jsx entirely.
+--     Those are live credentials -- a leaked Strava refresh token lets
+--     someone act on that person's Strava account indefinitely, outside of
+--     Trbo -- so this removes the blanket grant and replaces it with
+--     column-level grants covering only what the app actually reads
+--     client-side. subscribed/comp_access/comp_expires_at stay readable
+--     (the app displays them); the token and Stripe ID columns do not.
+--     Must run after every column referenced below already exists, so this
+--     stays as the last section in this file -- if you add more columns to
+--     profiles above, decide here whether the browser should ever read
+--     them and update the list below accordingly.
+revoke select on public.profiles from authenticated, anon;
+grant select (
+  id, name, ftp, trial_start, subscribed, settings, created_at,
+  strava_athlete_id, training_plan, comp_access, comp_expires_at
+) on public.profiles to authenticated, anon;
+
