@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Trbo — Admin Invite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #14171A;
+    --cream: #F3EDE3;
+    --teal: #2FC5AE;
+    --mint: #C0F5ED;
+    --tan: #E6CBA8;
+    --muted: #8B7F6E;
+    --border: #E3D9C8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--cream);
+    color: var(--ink);
+    font-family: 'Manrope', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+  }
+  h1 {
+    font-family: 'Big Shoulders Display', sans-serif;
+    font-weight: 900;
+    font-size: 28px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    margin: 0 0 4px;
+  }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 24px; line-height: 1.4; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
+  input[type="email"], input[type="password"], input[type="text"] {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 15px;
+    background: var(--cream);
+    color: var(--ink);
+  }
+  input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+  .checkbox-row input { width: 18px; height: 18px; accent-color: var(--teal); }
+  .checkbox-row label { margin: 0; font-weight: 500; }
+  button {
+    width: 100%;
+    margin-top: 22px;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: var(--ink);
+    color: var(--cream);
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:not(:disabled):hover { background: #000; }
+  .msg { margin-top: 18px; padding: 14px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
+  .msg.error { background: #fdecea; color: #b3261e; border: 1px solid #f3c6c2; }
+  .msg.success { background: var(--mint); color: var(--ink); border: 1px solid var(--teal); }
+  .link-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    word-break: break-all;
+    font-family: monospace;
+  }
+  .copy-btn {
+    margin-top: 8px;
+    background: var(--teal);
+    color: var(--ink);
+    padding: 10px;
+  }
+  .reset-key { margin-top: 20px; text-align: center; }
+  .reset-key a { color: var(--muted); font-size: 12px; text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Admin Invite</h1>
+    <p class="sub">Creates a Trbo account directly and gives you a one‑click sign‑in link to send — works even while public signups are paused.</p>
+
+    <div id="keyGate">
+      <label for="adminKey">Admin key</label>
+      <input type="password" id="adminKey" placeholder="Paste your admin key" autocomplete="off" />
+    </div>
+
+    <form id="inviteForm">
+      <label for="email">Email address</label>
+      <input type="email" id="email" required placeholder="person@example.com" />
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="compAccess" />
+        <label for="compAccess">Give free (comp) access</label>
+      </div>
+
+      <button type="submit" id="submitBtn">Create account & get link</button>
+    </form>
+
+    <div id="result"></div>
+
+    <div class="reset-key">
+      <a id="forgetKey">forget saved key on this device</a>
+    </div>
+  </div>
+
+  <script>
+    const keyInput = document.getElementById('adminKey');
+    const savedKey = localStorage.getItem('trbo_admin_key');
+    if (savedKey) keyInput.value = savedKey;
+
+    document.getElementById('forgetKey').addEventListener('click', () => {
+      localStorage.removeItem('trbo_admin_key');
+      keyInput.value = '';
+    });
+
+    const form = document.getElementById('inviteForm');
+    const resultEl = document.getElementById('result');
+    const submitBtn = document.getElementById('submitBtn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const key = keyInput.value.trim();
+      const email = document.getElementById('email').value.trim();
+      const compAccess = document.getElementById('compAccess').checked;
+
+      if (!key) {
+        resultEl.innerHTML = '<div class="msg error">Enter the admin key first.</div>';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Working…';
+      resultEl.innerHTML = '';
+
+      try {
+        const res = await fetch('/api/admin-invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret: key, email, compAccess }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          resultEl.innerHTML = `<div class="msg error">${data.error || 'Something went wrong.'}</div>`;
+        } else {
+          localStorage.setItem('trbo_admin_key', key);
+          resultEl.innerHTML = `
+            <div class="msg success">
+              Account created for <strong>${data.email}</strong>${data.compAccess ? ' with comp access' : ''}.
+              Send them this link — it logs them straight in:
+              <div class="link-box">${data.loginLink}</div>
+            </div>
+            <button type="button" class="copy-btn" id="copyBtn">Copy link</button>
+          `;
+          document.getElementById('copyBtn').addEventListener('click', () => {
+            navigator.clipboard.writeText(data.loginLink);
+            document.getElementById('copyBtn').textContent = 'Copied!';
+          });
+          form.reset();
+        }
+      } catch (err) {
+        resultEl.innerHTML = `<div class="msg error">Network error: ${err.message}</div>`;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create account & get link';
+      }
+    });
+  </script>
+</body>
+</html>
