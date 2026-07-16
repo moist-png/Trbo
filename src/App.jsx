@@ -1446,8 +1446,8 @@ const LIBRARY = [
     ],
   },
   {
-    id: 'ride-ironman-nice', name: 'Ironman Nice', category: 'Rides',
-    description: 'The Ironman Nice bike leg — a flat coastal rollout along the Promenade before the road tips up into the Alpes-Maritimes hinterland, over the Col de Vence, and back down to the sea.',
+    id: 'ride-ironman-nice', name: 'Riviera Coastal Climb', category: 'Rides',
+    description: 'A French Riviera long-course bike leg — a flat coastal rollout along the Promenade before the road tips up into the Alpes-Maritimes hinterland, over the Col de Vence, and back down to the sea.',
     intervals: [
       iv('Warm up', 600, 'power', 55),
       iv('Coastal rollout — Promenade des Anglais', 1500, 'power', 62),
@@ -1468,8 +1468,8 @@ const LIBRARY = [
     ],
   },
   {
-    id: 'ride-ironman-kona', name: 'Ironman Kona', category: 'Rides',
-    description: 'The Ironman World Championship bike course — flat lava-field highway out to Hawi, a stiff climb into the crosswind, and a long grinding return with the trade winds full in your face.',
+    id: 'ride-ironman-kona', name: 'Kona Lava Highway', category: 'Rides',
+    description: 'The Big Island\u2019s toughest long-course bike route — flat lava-field highway out to Hawi, a stiff climb into the crosswind, and a long grinding return with the trade winds full in your face.',
     intervals: [
       iv('Warm up', 600, 'power', 55),
       iv('Ali’i Drive rollout', 900, 'power', 62),
@@ -1489,7 +1489,7 @@ const LIBRARY = [
     ],
   },
   {
-    id: 'ride-ironman-lanzarote', name: 'Ironman Lanzarote', category: 'Rides',
+    id: 'ride-ironman-lanzarote', name: 'Lanzarote Fire Mountains', category: 'Rides',
     description: 'One of triathlon’s hardest bike courses — volcanic terrain, relentless crosswinds, and the brutal switchback climb up to Femés.',
     intervals: [
       iv('Warm up', 600, 'power', 55),
@@ -5025,11 +5025,28 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
             {stravaConnected ? (
               <button onClick={onDisconnectStrava} style={{ fontFamily: "'Manrope', sans-serif", padding: '7px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13, cursor: 'pointer' }}>Disconnect</button>
             ) : (
-              <button onClick={onConnectStrava} style={{ fontFamily: "'Manrope', sans-serif", padding: '7px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Connect</button>
+              // Strava API brand guidelines (developers.strava.com/guidelines): official
+              // "Connect with Strava" button, orange #FC5200, min 48px tall, exact button
+              // text, links to strava.com/oauth/authorize (see connectStrava() below).
+              <button
+                onClick={onConnectStrava}
+                aria-label="Connect with Strava"
+                style={{
+                  fontFamily: "'Manrope', sans-serif", display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', height: 48, padding: '0 20px', borderRadius: 6,
+                  border: 'none', background: '#FC5200', color: '#FFFFFF', fontWeight: 700,
+                  fontSize: 15, letterSpacing: 0.2, cursor: 'pointer', flexShrink: 0,
+                }}
+              >
+                Connect with Strava
+              </button>
             )}
           </div>
-          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, marginBottom: 6, lineHeight: 1.5 }}>
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, marginBottom: 4, lineHeight: 1.5 }}>
             Completed rides are pushed to your Strava account automatically once connected.
+          </div>
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: SUB, marginBottom: 6 }}>
+            Powered by Strava
           </div>
         </>
       ) : null}
