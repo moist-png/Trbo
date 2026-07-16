@@ -3539,13 +3539,17 @@ function SavedQueuesList({ savedQueues, customWorkouts, onLoad, onDelete }) {
   );
 }
 
-function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear, onStartQueue, savedQueues = [], maxSavedQueues = 8, maxSavedQueueWorkouts = 8, onSaveQueue, onLoadSavedQueue, onDeleteSavedQueue }) {
+function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear, onStartQueue, savedQueues = [], maxSavedQueues = 8, maxSavedQueueWorkouts = 8, onSaveQueue, onLoadSavedQueue, onDeleteSavedQueue, lastRemovedQueueItem, onUndoRemove }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const resolved = useMemo(() => {
     const all = LIBRARY.concat(customWorkouts);
     return queue.map(id => all.find(w => w.id === id)).filter(Boolean);
   }, [queue, customWorkouts]);
   const totalSeconds = resolved.reduce((sum, w) => sum + totalDuration(w.intervals), 0);
+  const removedWorkout = useMemo(() => {
+    if (!lastRemovedQueueItem) return null;
+    return LIBRARY.concat(customWorkouts).find(w => w.id === lastRemovedQueueItem.id) || null;
+  }, [lastRemovedQueueItem, customWorkouts]);
 
   return (
     <div style={{ padding: '16px 16px 80px' }}>
@@ -3553,6 +3557,18 @@ function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear
       <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, color: SUB, marginBottom: 16 }}>
         {resolved.length === 0 ? 'Nothing queued yet.' : `${resolved.length} workout${resolved.length === 1 ? '' : 's'} · ${fmtLong(totalSeconds)} back-to-back`}
       </div>
+
+      {removedWorkout && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 10px 8px 12px', marginBottom: 14 }}>
+          <div style={{ flex: 1, minWidth: 0, fontFamily: "'Manrope', sans-serif", fontSize: 12.5, color: SUB, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Removed <span style={{ color: TEXT, fontWeight: 600 }}>{removedWorkout.name}</span>
+          </div>
+          <button onClick={onUndoRemove}
+            style={{ fontFamily: "'Manrope', sans-serif", flexShrink: 0, background: 'none', border: `1px solid ${LINE}`, borderRadius: 7, padding: '5px 11px', color: 'var(--accent)', fontWeight: 700, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <RotateCcw size={12} /> Undo
+          </button>
+        </div>
+      )}
 
       <SavedQueuesList savedQueues={savedQueues} customWorkouts={customWorkouts} onLoad={onLoadSavedQueue} onDelete={onDeleteSavedQueue} />
 
@@ -5922,6 +5938,9 @@ export default function App() {
   const [starredIds, setStarredIds] = useState(new Set());
   const [queue, setQueue] = useState([]); // ordered array of workout ids lined up to ride back-to-back
   const [savedQueues, setSavedQueues] = useState([]); // named, reloadable queue presets ("Monday plan", etc.)
+  const [lastRemovedQueueItem, setLastRemovedQueueItem] = useState(null); // { id, index } of the most recently removed queue workout, for Undo
+  const undoTimerRef = useRef(null);
+  useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
   const [activeQueue, setActiveQueue] = useState(() => (initialSession && initialSession.kind === 'queue' ? initialSession.queueWorkouts : null)); // array of resolved workout objects while a queue is actively playing, or null
   const [activeQueueIndex, setActiveQueueIndex] = useState(() => (initialSession && initialSession.kind === 'queue' ? initialSession.queueIndex : 0));
   const [ftpHistory, setFtpHistory] = useState([]);
@@ -6337,11 +6356,33 @@ export default function App() {
       return next;
     });
   }
+  const UNDO_REMOVE_MS = 8000;
   function removeFromQueue(workoutId) {
     setQueue(prev => {
+      const index = prev.indexOf(workoutId);
       const next = prev.filter(id => id !== workoutId);
       persistQueue(next);
+      if (index !== -1) {
+        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        setLastRemovedQueueItem({ id: workoutId, index });
+        undoTimerRef.current = setTimeout(() => setLastRemovedQueueItem(null), UNDO_REMOVE_MS);
+      }
       return next;
+    });
+  }
+  function undoRemoveFromQueue() {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setLastRemovedQueueItem(item => {
+      if (!item) return null;
+      setQueue(prev => {
+        // If it somehow got re-added already, don't duplicate it.
+        if (prev.includes(item.id)) return prev;
+        const next = prev.slice();
+        next.splice(Math.min(item.index, next.length), 0, item.id);
+        persistQueue(next);
+        return next;
+      });
+      return null;
     });
   }
   function moveQueueItem(workoutId, dir) {
@@ -6658,7 +6699,7 @@ export default function App() {
             {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
             {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} />}
             {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
-            {view === 'queue' && <QueueView queue={queue} customWorkouts={customWorkouts} onOpen={setDetailWorkout} onRemove={removeFromQueue} onReorder={reorderQueue} onClear={clearQueue} onStartQueue={startQueue} savedQueues={savedQueues} maxSavedQueues={MAX_SAVED_QUEUES} maxSavedQueueWorkouts={MAX_SAVED_QUEUE_WORKOUTS} onSaveQueue={saveQueueAs} onLoadSavedQueue={loadSavedQueue} onDeleteSavedQueue={deleteSavedQueue} />}
+            {view === 'queue' && <QueueView queue={queue} customWorkouts={customWorkouts} onOpen={setDetailWorkout} onRemove={removeFromQueue} onReorder={reorderQueue} onClear={clearQueue} onStartQueue={startQueue} savedQueues={savedQueues} maxSavedQueues={MAX_SAVED_QUEUES} maxSavedQueueWorkouts={MAX_SAVED_QUEUE_WORKOUTS} onSaveQueue={saveQueueAs} onLoadSavedQueue={loadSavedQueue} onDeleteSavedQueue={deleteSavedQueue} lastRemovedQueueItem={lastRemovedQueueItem} onUndoRemove={undoRemoveFromQueue} />}
             {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
             {view === 'history' && <HistoryView workoutHistory={workoutHistory} onClear={clearWorkoutHistory} />}
             {view === 'feedback' && <FeedbackView userId={user.id} />}
