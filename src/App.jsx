@@ -5080,6 +5080,63 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
             ))}
           </div>
           <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11.5, color: SUB, marginBottom: 6 }}>{ownerStats.total_rides_logged} rides logged in total, across everyone.</div>
+
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 16, marginBottom: 8 }}>Retention &amp; conversion</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            {[
+              { label: 'Trial → paid conversion', value: ownerStats.trial_to_paid_conversion_pct != null ? `${ownerStats.trial_to_paid_conversion_pct}%` : null },
+              { label: 'Riders active, last 7d', value: ownerStats.active_riders_last_7_days },
+              { label: 'Riders active, last 30d', value: ownerStats.active_riders_last_30_days },
+              { label: 'Subscribers idle 14d+', value: ownerStats.subscribers_inactive_14_days },
+            ].map((c, i) => (
+              <div key={i} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 10 }}>
+                <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>{c.label}</div>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, color: TEXT }}>{c.value ?? '–'}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 16, marginBottom: 8 }}>What people actually use</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+            {[
+              { label: 'Used the planner', value: ownerStats.planner_adoption_pct != null ? `${ownerStats.planner_adoption_pct}%` : null },
+              { label: 'Ever queued a workout', value: ownerStats.queue_usage_pct != null ? `${ownerStats.queue_usage_pct}%` : null },
+              { label: 'Ever starred a workout', value: ownerStats.starred_usage_pct != null ? `${ownerStats.starred_usage_pct}%` : null },
+            ].map((c, i) => (
+              <div key={i} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 10 }}>
+                <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>{c.label}</div>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, color: TEXT }}>{c.value ?? '–'}</div>
+              </div>
+            ))}
+          </div>
+
+          {(ownerStats.top_categories_30d?.length > 0 || ownerStats.top_workouts_30d?.length > 0) && (
+            <>
+              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8 }}>Popular this month</div>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                {ownerStats.top_categories_30d?.length > 0 && (
+                  <div style={{ flex: '1 1 200px', background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 6 }}>By category</div>
+                    {ownerStats.top_categories_30d.map((c, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Manrope', sans-serif", fontSize: 13, color: TEXT, padding: '3px 0' }}>
+                        <span>{c.category}</span><span style={{ color: SUB }}>{c.rides}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {ownerStats.top_workouts_30d?.length > 0 && (
+                  <div style={{ flex: '1 1 200px', background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 6 }}>By workout</div>
+                    {ownerStats.top_workouts_30d.map((w, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontFamily: "'Manrope', sans-serif", fontSize: 13, color: TEXT, padding: '3px 0' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span><span style={{ color: SUB, flexShrink: 0 }}>{w.rides}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

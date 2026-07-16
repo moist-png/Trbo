@@ -201,7 +201,69 @@ begin
     'signups_last_30_days', (select count(*) from public.profiles where created_at > now() - interval '30 days'),
     'rides_last_24h', (select count(*) from public.workout_history where date > now() - interval '1 day'),
     'rides_last_7_days', (select count(*) from public.workout_history where date > now() - interval '7 days'),
-    'total_rides_logged', (select count(*) from public.workout_history)
+    'total_rides_logged', (select count(*) from public.workout_history),
+
+    -- Understanding users: conversion, retention, and churn risk, so you can
+    -- tell at a glance whether the trial is working and whether paying
+    -- riders are actually sticking around, not just whether signups exist.
+    'trial_to_paid_conversion_pct', (
+      select case when (
+          count(*) filter (where subscribed = true) + count(*) filter (where subscribed = false and trial_start <= now() - interval '7 days')
+        ) = 0 then null
+        else round(100.0 * count(*) filter (where subscribed = true) / (
+          count(*) filter (where subscribed = true) + count(*) filter (where subscribed = false and trial_start <= now() - interval '7 days')
+        ), 1)
+      end
+      from public.profiles
+    ),
+    'active_riders_last_7_days', (select count(distinct user_id) from public.workout_history where date > now() - interval '7 days'),
+    'active_riders_last_30_days', (select count(distinct user_id) from public.workout_history where date > now() - interval '30 days'),
+    'subscribers_inactive_14_days', (
+      select count(*) from public.profiles p
+      where p.subscribed = true
+        and not exists (select 1 from public.workout_history wh where wh.user_id = p.id and wh.date > now() - interval '14 days')
+    ),
+
+    -- Understanding product choices: which built-in features people
+    -- actually adopt (planner, queue, starring), and which workouts/
+    -- categories they actually ride, versus what's just sitting in the
+    -- library unused.
+    'planner_adoption_pct', (
+      select case when (select count(*) from public.profiles) = 0 then null
+        else round(100.0 * count(*) filter (where training_plan is not null or id in (select user_id from public.archived_plans)) / (select count(*) from public.profiles), 1)
+      end
+      from public.profiles
+    ),
+    'queue_usage_pct', (
+      select case when (select count(*) from public.profiles) = 0 then null
+        else round(100.0 * (select count(distinct user_id) from public.queued_workouts) / (select count(*) from public.profiles), 1)
+      end
+    ),
+    'starred_usage_pct', (
+      select case when (select count(*) from public.profiles) = 0 then null
+        else round(100.0 * (select count(distinct user_id) from public.starred_workouts) / (select count(*) from public.profiles), 1)
+      end
+    ),
+    'top_categories_30d', (
+      select coalesce(json_agg(row_to_json(t)), '[]'::json) from (
+        select category, count(*) as rides
+        from public.workout_history
+        where date > now() - interval '30 days' and category is not null
+        group by category
+        order by rides desc
+        limit 6
+      ) t
+    ),
+    'top_workouts_30d', (
+      select coalesce(json_agg(row_to_json(t)), '[]'::json) from (
+        select name, count(*) as rides
+        from public.workout_history
+        where date > now() - interval '30 days' and name is not null
+        group by name
+        order by rides desc
+        limit 8
+      ) t
+    )
   ) into result;
 
   return result;
