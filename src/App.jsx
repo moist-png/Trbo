@@ -2909,7 +2909,6 @@ function HomeView({ account, ftpHistory, workoutHistory, trainingPlan, onNavigat
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Late one' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const firstName = (account && account.name ? account.name.split(' ')[0] : '') || 'Rider';
-  const initial = firstName.charAt(0).toUpperCase();
 
   const weekAgo = Date.now() - 7 * 86400000;
   const thisWeek = (workoutHistory || []).filter(w => new Date(w.date).getTime() >= weekAgo);
@@ -2970,7 +2969,6 @@ function HomeView({ account, ftpHistory, workoutHistory, trainingPlan, onNavigat
 
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          <div style={{ width: 44, height: 44, borderRadius: '50%', background: PANEL2, border: `1px solid ${LINE}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Oswald, sans-serif', fontWeight: 600, fontSize: 18, color: 'var(--accent)' }}>{initial}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{greeting}</div>
             <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, lineHeight: 1.1 }}>{firstName}</div>
@@ -3443,6 +3441,7 @@ function QueueRowList({ resolved, onOpen, onRemove, onReorder }) {
             style={{
               display: 'flex', alignItems: 'center', gap: 10, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 12,
               touchAction: isDragging ? 'none' : 'pan-y',
+              WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none',
               transform: isDragging ? `translateY(${dragOffsetY}px) scale(1.02)` : 'none',
               boxShadow: isDragging ? '0 8px 20px rgba(0,0,0,0.25)' : 'none',
               position: 'relative', zIndex: isDragging ? 2 : 1, cursor: 'grab',
