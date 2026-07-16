@@ -2565,7 +2565,7 @@ function CollapsibleSection({ icon, title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{ marginTop: 20 }}>
-      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', padding: 0, marginBottom: open ? 8 : 0, cursor: 'pointer', textAlign: 'left' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', borderBottom: `1px solid ${LINE}`, padding: 0, paddingBottom: 12, marginBottom: open ? 8 : 0, cursor: 'pointer', textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {icon}
           <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, fontWeight: 700, color: SUB, letterSpacing: 0.6, textTransform: 'uppercase' }}>{title}</div>
