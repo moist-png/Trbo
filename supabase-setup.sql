@@ -939,6 +939,32 @@ alter table public.trial_survey_responses enable row level security;
 alter table public.profiles add column if not exists email_opt_out boolean default false;
 revoke update (email_opt_out) on public.profiles from authenticated;
 
+-- 20b. Saved workout queues: a rider can save their current queue as a named
+--      preset ("Monday plan", "Weekend plan", etc.) and reload it later --
+--      separate from the single active queue in queued_workouts (section
+--      17) above, which is just "what's lined up to ride right now."
+--      Capped client-side at 8 saved queues per person, 8 workouts each --
+--      generous enough for real use, small enough to keep the UI and this
+--      table tidy. Easy to loosen later; these are just numbers in the app.
+create table if not exists public.saved_queues (
+  id bigint generated always as identity primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  name text not null,
+  workout_ids jsonb not null default '[]'::jsonb,
+  created_at timestamptz default now()
+);
+create index if not exists saved_queues_user_idx on public.saved_queues (user_id, created_at);
+
+alter table public.saved_queues enable row level security;
+drop policy if exists "Users can view own saved queues" on public.saved_queues;
+create policy "Users can view own saved queues" on public.saved_queues for select using (auth.uid() = user_id);
+drop policy if exists "Users can save own queues" on public.saved_queues;
+create policy "Users can save own queues" on public.saved_queues for insert with check (auth.uid() = user_id);
+drop policy if exists "Users can rename own saved queues" on public.saved_queues;
+create policy "Users can rename own saved queues" on public.saved_queues for update using (auth.uid() = user_id);
+drop policy if exists "Users can delete own saved queues" on public.saved_queues;
+create policy "Users can delete own saved queues" on public.saved_queues for delete using (auth.uid() = user_id);
+
 -- 21. The BEFORE UPDATE trigger in section 6b stops writes to the
 --     credential/billing columns, but does nothing about reads -- Supabase's
 --     default table-wide SELECT grant meant a signed-in person's own

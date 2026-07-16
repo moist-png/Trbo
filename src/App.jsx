@@ -3453,7 +3453,93 @@ function QueueRowList({ resolved, onOpen, onRemove, onReorder }) {
   );
 }
 
-function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear, onStartQueue }) {
+// Inline "name it and save" control for turning the current queue into a
+// reloadable preset. Surfaces the specific reason a save was rejected
+// (name limit, workout-count limit, saved-queue limit) rather than failing
+// silently.
+function SaveQueueControl({ queueLength, savedCount, maxSaved, maxWorkouts, onSave }) {
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+
+  if (queueLength === 0) return null;
+
+  function submit() {
+    const result = onSave(name);
+    if (!result || !result.ok) {
+      if (result?.reason === 'limit') setError(`You've reached the ${maxSaved}-saved-queue limit — delete one first.`);
+      else if (result?.reason === 'too-long') setError(`Saved queues are capped at ${maxWorkouts} workouts — trim your queue first.`);
+      else if (result?.reason === 'name') setError('Give it a name first.');
+      else setError('Could not save — try again.');
+      return;
+    }
+    setSaving(false);
+    setName('');
+    setError('');
+  }
+
+  if (!saving) {
+    return (
+      <button onClick={() => setSaving(true)}
+        style={{ fontFamily: "'Manrope', sans-serif", padding: '9px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Save size={13} /> Save this queue
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 4 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input value={name} onChange={e => { setName(e.target.value); setError(''); }} placeholder="e.g. Monday plan" autoFocus
+          onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setSaving(false); setError(''); } }}
+          style={{ fontFamily: "'Manrope', sans-serif", flex: 1, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '8px 10px', fontSize: 13 }} />
+        <button onClick={submit} style={{ fontFamily: "'Manrope', sans-serif", padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>Save</button>
+        <button onClick={() => { setSaving(false); setError(''); }} style={{ fontFamily: "'Manrope', sans-serif", padding: '8px 10px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
+      </div>
+      {error && <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11.5, color: RED }}>{error}</div>}
+      <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: SUB }}>{savedCount}/{maxSaved} saved queues used</div>
+    </div>
+  );
+}
+
+// Named queue presets a rider can reload. Shown whenever any exist, even if
+// the active queue is currently empty -- loading a saved queue is very
+// likely exactly why someone opened this tab with nothing queued.
+function SavedQueuesList({ savedQueues, customWorkouts, onLoad, onDelete }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  if (!savedQueues.length) return null;
+  const all = LIBRARY.concat(customWorkouts);
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8 }}>Saved queues</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {savedQueues.map(sq => {
+          const resolvedWorkouts = sq.workoutIds.map(id => all.find(w => w.id === id)).filter(Boolean);
+          const totalSecs = resolvedWorkouts.reduce((sum, w) => sum + totalDuration(w.intervals), 0);
+          return (
+            <div key={sq.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 700, fontSize: 15, color: TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sq.name}</div>
+                <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11.5, color: SUB, marginTop: 2 }}>{resolvedWorkouts.length} workout{resolvedWorkouts.length === 1 ? '' : 's'} · {fmtLong(totalSecs)}</div>
+              </div>
+              <button onClick={() => onLoad(sq.id)} title="Load into queue"
+                style={{ fontFamily: "'Manrope', sans-serif", background: 'var(--accent)', border: 'none', borderRadius: 8, padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontWeight: 700, fontSize: 12, color: INK, flexShrink: 0 }}>
+                <Play size={13} fill={INK} /> Load
+              </button>
+              {confirmDeleteId === sq.id ? (
+                <IconBtn onClick={() => { onDelete(sq.id); setConfirmDeleteId(null); }} danger><Check size={15} /></IconBtn>
+              ) : (
+                <IconBtn onClick={() => setConfirmDeleteId(sq.id)} danger><Trash2 size={15} /></IconBtn>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear, onStartQueue, savedQueues = [], maxSavedQueues = 8, maxSavedQueueWorkouts = 8, onSaveQueue, onLoadSavedQueue, onDeleteSavedQueue }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const resolved = useMemo(() => {
     const all = LIBRARY.concat(customWorkouts);
@@ -3467,6 +3553,8 @@ function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear
       <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, color: SUB, marginBottom: 16 }}>
         {resolved.length === 0 ? 'Nothing queued yet.' : `${resolved.length} workout${resolved.length === 1 ? '' : 's'} · ${fmtLong(totalSeconds)} back-to-back`}
       </div>
+
+      <SavedQueuesList savedQueues={savedQueues} customWorkouts={customWorkouts} onLoad={onLoadSavedQueue} onDelete={onDeleteSavedQueue} />
 
       {resolved.length === 0 ? (
         <div style={{ fontFamily: "'Manrope', sans-serif", color: SUB, fontSize: 13, textAlign: 'center', padding: '30px 20px', border: `1px dashed ${LINE}`, borderRadius: 10, lineHeight: 1.6 }}>
@@ -3483,10 +3571,11 @@ function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear
 
           <QueueRowList resolved={resolved} onOpen={onOpen} onRemove={onRemove} onReorder={onReorder} />
 
-          <div style={{ marginTop: 18 }}>
+          <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <SaveQueueControl queueLength={resolved.length} savedCount={savedQueues.length} maxSaved={maxSavedQueues} maxWorkouts={maxSavedQueueWorkouts} onSave={onSaveQueue} />
             {!confirmClear ? (
               <button onClick={() => setConfirmClear(true)}
-                style={{ fontFamily: "'Manrope', sans-serif", padding: '9px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: RED, fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                style={{ fontFamily: "'Manrope', sans-serif", padding: '9px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: RED, fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start' }}>
                 <RefreshCw size={13} /> Clear queue
               </button>
             ) : (
@@ -5832,6 +5921,7 @@ export default function App() {
   const [customWorkouts, setCustomWorkouts] = useState([]);
   const [starredIds, setStarredIds] = useState(new Set());
   const [queue, setQueue] = useState([]); // ordered array of workout ids lined up to ride back-to-back
+  const [savedQueues, setSavedQueues] = useState([]); // named, reloadable queue presets ("Monday plan", etc.)
   const [activeQueue, setActiveQueue] = useState(() => (initialSession && initialSession.kind === 'queue' ? initialSession.queueWorkouts : null)); // array of resolved workout objects while a queue is actively playing, or null
   const [activeQueueIndex, setActiveQueueIndex] = useState(() => (initialSession && initialSession.kind === 'queue' ? initialSession.queueIndex : 0));
   const [ftpHistory, setFtpHistory] = useState([]);
@@ -5973,7 +6063,7 @@ export default function App() {
   // Once we know who's logged in, load their profile + saved data from the database.
   const [ownerStats, setOwnerStats] = useState(null); // non-null only when logged in as the app owner
   useEffect(() => {
-    if (!user) { setProfile(null); setCustomWorkouts([]); setStarredIds(new Set()); setQueue([]); setFtpHistory([]); setWorkoutHistory([]); setTrainingPlan(null); setArchivedPlans([]); setOwnerStats(null); return; }
+    if (!user) { setProfile(null); setCustomWorkouts([]); setStarredIds(new Set()); setQueue([]); setSavedQueues([]); setFtpHistory([]); setWorkoutHistory([]); setTrainingPlan(null); setArchivedPlans([]); setOwnerStats(null); return; }
     let mounted = true;
     (async () => {
       setProfileLoading(true);
@@ -6003,6 +6093,10 @@ export default function App() {
       // queued_workouts hasn't been created yet.
       const { data: queued, error: queuedErr } = await supabase.from('queued_workouts').select('workout_id').eq('user_id', user.id).order('position', { ascending: true });
       if (mounted && !queuedErr && queued) setQueue(queued.map(q => q.workout_id));
+      // Saved queue presets. Wrapped the same way -- degrades to an empty
+      // (but working) list if saved_queues hasn't been created yet.
+      const { data: saved, error: savedErr } = await supabase.from('saved_queues').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
+      if (mounted && !savedErr && saved) setSavedQueues(saved.map(s => ({ id: s.id, name: s.name, workoutIds: s.workout_ids || [] })));
       const { data: history } = await supabase.from('ftp_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
       if (mounted && history) setFtpHistory(history.map(h => ({ id: h.id, date: h.date, ftp: h.ftp, source: h.source })));
       const { data: sessions } = await supabase.from('workout_history').select('*').eq('user_id', user.id).order('date', { ascending: true });
@@ -6281,6 +6375,37 @@ export default function App() {
     if (user) supabase.from('queued_workouts').delete().eq('user_id', user.id).then(() => {});
   }
 
+  // ---- saved queue presets: named snapshots of the current queue a rider
+  // can reload later ("Monday plan", "Weekend plan"). Capped at
+  // MAX_SAVED_QUEUES presets, MAX_SAVED_QUEUE_WORKOUTS workouts each -- both
+  // easy to change later since they're just numbers here. ----
+  const MAX_SAVED_QUEUES = 8;
+  const MAX_SAVED_QUEUE_WORKOUTS = 8;
+  function saveQueueAs(name) {
+    const trimmedName = (name || '').trim();
+    if (!trimmedName || !user) return { ok: false, reason: 'name' };
+    if (savedQueues.length >= MAX_SAVED_QUEUES) return { ok: false, reason: 'limit' };
+    if (queue.length === 0) return { ok: false, reason: 'empty' };
+    if (queue.length > MAX_SAVED_QUEUE_WORKOUTS) return { ok: false, reason: 'too-long' };
+    const tempId = `temp_${Date.now()}`;
+    const workoutIds = [...queue];
+    setSavedQueues(prev => [...prev, { id: tempId, name: trimmedName, workoutIds }]);
+    supabase.from('saved_queues').insert({ user_id: user.id, name: trimmedName, workout_ids: workoutIds }).select('id').maybeSingle().then(({ data }) => {
+      if (data) setSavedQueues(prev => prev.map(sq => (sq.id === tempId ? { ...sq, id: data.id } : sq)));
+    });
+    return { ok: true };
+  }
+  function loadSavedQueue(id) {
+    const sq = savedQueues.find(s => s.id === id);
+    if (!sq) return;
+    setQueue(sq.workoutIds);
+    persistQueue(sq.workoutIds);
+  }
+  function deleteSavedQueue(id) {
+    setSavedQueues(prev => prev.filter(sq => sq.id !== id));
+    if (user) supabase.from('saved_queues').delete().eq('id', id).eq('user_id', user.id).then(() => {});
+  }
+
   // ---- active queue playback: rolls two or more workouts seamlessly into
   // each other without dropping back to the library in between ----
   function startQueue(workouts) {
@@ -6533,7 +6658,7 @@ export default function App() {
             {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
             {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} />}
             {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
-            {view === 'queue' && <QueueView queue={queue} customWorkouts={customWorkouts} onOpen={setDetailWorkout} onRemove={removeFromQueue} onReorder={reorderQueue} onClear={clearQueue} onStartQueue={startQueue} />}
+            {view === 'queue' && <QueueView queue={queue} customWorkouts={customWorkouts} onOpen={setDetailWorkout} onRemove={removeFromQueue} onReorder={reorderQueue} onClear={clearQueue} onStartQueue={startQueue} savedQueues={savedQueues} maxSavedQueues={MAX_SAVED_QUEUES} maxSavedQueueWorkouts={MAX_SAVED_QUEUE_WORKOUTS} onSaveQueue={saveQueueAs} onLoadSavedQueue={loadSavedQueue} onDeleteSavedQueue={deleteSavedQueue} />}
             {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
             {view === 'history' && <HistoryView workoutHistory={workoutHistory} onClear={clearWorkoutHistory} />}
             {view === 'feedback' && <FeedbackView userId={user.id} />}
