@@ -17,6 +17,7 @@
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from './_rateLimit.js';
+import { verifyUser } from './_auth.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -50,12 +51,19 @@ export default async function handler(req, res) {
   });
   if (!ok) return;
 
+  // Who's actually signed in, verified against Supabase -- not just
+  // whatever userId/email happened to be in the request body. Someone can
+  // only ever start a checkout for their own account this way.
+  const verifiedUser = await verifyUser(supabaseAdmin, req);
+  if (!verifiedUser) {
+    res.status(401).json({ error: 'Please sign in again and retry.' });
+    return;
+  }
+
   try {
-    const { userId, email, plan } = req.body || {};
-    if (!userId || !email) {
-      res.status(400).json({ error: 'Missing userId or email.' });
-      return;
-    }
+    const { plan } = req.body || {};
+    const userId = verifiedUser.id;
+    const email = verifiedUser.email;
     const isAnnual = plan === 'annual';
     const priceId = isAnnual ? ANNUAL_PRICE_ID : MONTHLY_PRICE_ID;
 

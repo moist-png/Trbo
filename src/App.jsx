@@ -16,6 +16,19 @@ import {
 } from './nativeBle';
 import { ColorblindContext } from './colorblindContext';
 
+// Calls one of our own /api/... functions the same way fetch() does, but
+// first attaches the current sign-in token (if there is one) as a standard
+// Authorization header. Those functions use that token to confirm who's
+// really asking -- so this is what lets checkout, and connecting/uploading
+// to Strava, work at all now that they no longer just take our word for
+// which account is calling.
+async function apiFetch(url, options = {}) {
+  const { data: { session } = {} } = await supabase.auth.getSession();
+  const headers = { ...(options.headers || {}) };
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  return fetch(url, { ...options, headers });
+}
+
 // ---------- palette ----------
 // TEXT/SUB/PANEL/PANEL2/LINE/RED/BG/MUTED resolve through CSS custom
 // properties (set on the app's root wrapper from THEMES below) so every
@@ -5161,10 +5174,10 @@ function PaywallView({ blocking, trialExpired, onClose, onLogout, userId, email 
     setError('');
     setRedirecting(true);
     try {
-      const res = await fetch('/api/create-checkout-session', {
+      const res = await apiFetch('/api/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, email, plan }),
+        body: JSON.stringify({ plan }),
       });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error(data.error || 'Could not start checkout.');
@@ -5848,10 +5861,10 @@ export default function App() {
     window.history.replaceState({}, '', window.location.pathname);
     (async () => {
       try {
-        const res = await fetch('/api/strava-connect', {
+        const res = await apiFetch('/api/strava-connect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user.id, code }),
+          body: JSON.stringify({ code }),
         });
         if (res.ok) {
           const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
@@ -5870,10 +5883,10 @@ export default function App() {
   }
   async function disconnectStrava() {
     if (!user) return;
-    await fetch('/api/strava-connect', {
+    await apiFetch('/api/strava-connect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: user.id, disconnect: true }),
+      body: JSON.stringify({ disconnect: true }),
     });
     setProfile(p => (p ? { ...p, strava_athlete_id: null } : p));
   }
@@ -5905,10 +5918,10 @@ export default function App() {
     // Only push genuinely finished rides of real length to Strava — not
     // aborted attempts — and only for people who've connected their account.
     if (user && completed && duration >= 60 && profile && profile.strava_athlete_id) {
-      fetch('/api/strava-upload', {
+      apiFetch('/api/strava-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, name, durationSeconds: duration, date: entry.date, avgPower, maxPower }),
+        body: JSON.stringify({ name, durationSeconds: duration, date: entry.date, avgPower, maxPower }),
       }).catch(() => {});
     }
   }

@@ -4,6 +4,7 @@
 // first if it's expired, using the stored refresh token.
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from './_rateLimit.js';
+import { verifyUser } from './_auth.js';
 
 const SUPABASE_URL = 'https://wxwdqqjzfrfddqcgkrfv.supabase.co';
 const supabaseAdmin = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -38,11 +39,21 @@ export default async function handler(req, res) {
   });
   if (!ok) return;
 
+  // Who's actually signed in, verified against Supabase -- not just
+  // whatever userId happened to be in the request body. Someone can only
+  // ever push a ride to their own Strava this way.
+  const verifiedUser = await verifyUser(supabaseAdmin, req);
+  if (!verifiedUser) {
+    res.status(401).json({ error: 'Please sign in again and retry.' });
+    return;
+  }
+
   try {
     // Heart rate is deliberately not accepted here. Trbo shows it live but
     // never stores or forwards it, so it is not part of the Strava payload.
-    const { userId, name, durationSeconds, date, avgPower, maxPower } = req.body || {};
-    if (!userId || !name || !durationSeconds) {
+    const { name, durationSeconds, date, avgPower, maxPower } = req.body || {};
+    const userId = verifiedUser.id;
+    if (!name || !durationSeconds) {
       res.status(400).json({ error: 'Missing required fields.' });
       return;
     }

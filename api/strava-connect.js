@@ -4,6 +4,7 @@
 // never have to pass through or live in the browser.
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from './_rateLimit.js';
+import { verifyUser } from './_auth.js';
 
 const SUPABASE_URL = 'https://wxwdqqjzfrfddqcgkrfv.supabase.co';
 const supabaseAdmin = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -22,12 +23,18 @@ export default async function handler(req, res) {
   });
   if (!ok) return;
 
+  // Who's actually signed in, verified against Supabase -- not just
+  // whatever userId happened to be in the request body. Someone can only
+  // ever connect or disconnect Strava on their own account this way.
+  const verifiedUser = await verifyUser(supabaseAdmin, req);
+  if (!verifiedUser) {
+    res.status(401).json({ error: 'Please sign in again and retry.' });
+    return;
+  }
+
   try {
-    const { userId, code, disconnect } = req.body || {};
-    if (!userId) {
-      res.status(400).json({ error: 'Missing userId.' });
-      return;
-    }
+    const { code, disconnect } = req.body || {};
+    const userId = verifiedUser.id;
 
     if (disconnect) {
       await supabaseAdmin.from('profiles').update({
