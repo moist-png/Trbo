@@ -4,6 +4,7 @@ import {
   GOALS, PHASE, PURPOSE_LABEL, WORKOUT_PURPOSE,
   generatePlan, validatePlan, swapOptionsForPurpose, swapDayWorkout, applyCheckin,
   estimateWorkoutTss, currentPlanWeek, isPlanComplete, changePlanDaysPerWeek,
+  WEEKDAY_LABELS, WEEKDAY_LABELS_FULL, defaultWeekdayPattern, setWeekdayPattern,
 } from './planner';
 import { ColorblindContext } from './colorblindContext';
 
@@ -158,7 +159,7 @@ function PlannerSetup({ ftp, recentWeeklyTss, onGenerate }) {
 // detail sheet as everywhere else). Tapping "Swap" opens the same-purpose
 // picker.
 // ---------------------------------------------------------------------------
-function DayRow({ day, library, onOpen, onSwap }) {
+function DayRow({ day, weekday, library, onOpen, onSwap }) {
   const [swapping, setSwapping] = useState(false);
   const options = useMemo(() => swapOptionsForPurpose(day.purpose, library), [day.purpose, library]);
   const workout = library.find(w => w.id === day.workoutId);
@@ -167,6 +168,11 @@ function DayRow({ day, library, onOpen, onSwap }) {
   return (
     <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {weekday && (
+          <div title={WEEKDAY_LABELS_FULL[weekday.index]} style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 8, background: PANEL2, border: `1px solid ${LINE}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT_BODY, fontSize: 11, fontWeight: 700, letterSpacing: 0.3, color: SUB, textTransform: 'uppercase' }}>
+            {weekday.label}
+          </div>
+        )}
         <div onClick={() => workout && onOpen(workout, day.plannedSeconds)} style={{ flex: 1, minWidth: 0, cursor: workout ? 'pointer' : 'default' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
             <span style={{ fontFamily: FONT_BODY, fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>{PURPOSE_LABEL[day.purpose] || day.purpose}</span>
@@ -211,7 +217,7 @@ function DayRow({ day, library, onOpen, onSwap }) {
 // ---------------------------------------------------------------------------
 // One week: header (phase, load, recovery badge) + the day rows. Collapsible.
 // ---------------------------------------------------------------------------
-function WeekCard({ week, library, defaultOpen, isCurrent, cardRef, onOpen, onSwap, onCheckin }) {
+function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardRef, onOpen, onSwap, onCheckin }) {
   const [open, setOpen] = useState(defaultOpen);
   const cvd = useContext(ColorblindContext);
   const phaseInfo = PHASE[week.phase];
@@ -236,9 +242,13 @@ function WeekCard({ week, library, defaultOpen, isCurrent, cardRef, onOpen, onSw
         <div style={{ padding: '0 14px 14px' }}>
           <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 12, lineHeight: 1.5, fontStyle: 'italic' }}>{phaseInfo.blurb}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {week.days.map((d, i) => (
-              <DayRow key={i} day={d} library={library} onOpen={onOpen} onSwap={(newId) => onSwap(week.weekNumber, i, newId)} />
-            ))}
+            {week.days.map((d, i) => {
+              const dayIdx = weekdayPattern && weekdayPattern.length ? weekdayPattern[i % weekdayPattern.length] : null;
+              const weekday = dayIdx != null ? { index: dayIdx, label: WEEKDAY_LABELS[dayIdx] } : null;
+              return (
+                <DayRow key={i} day={d} weekday={weekday} library={library} onOpen={onOpen} onSwap={(newId) => onSwap(week.weekNumber, i, newId)} />
+              );
+            })}
           </div>
           {/* Weekly check-in */}
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
@@ -262,6 +272,7 @@ function WeekCard({ week, library, defaultOpen, isCurrent, cardRef, onOpen, onSw
 export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSavePlan, onOpenPlanWorkout, archivedPlans = [], onArchivePlan, onDeleteArchivedPlan }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dayEditor, setDayEditor] = useState(false);
+  const [weekdayEditor, setWeekdayEditor] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const currentWeekRef = useRef(null);
 
@@ -270,6 +281,11 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
   // correct as days pass. Falls back to 1 when there's no plan.
   const currentWeek = plan ? currentPlanWeek(plan) : 1;
   const planComplete = plan ? isPlanComplete(plan) : false;
+  // Older plans (saved before this feature shipped) won't have a pattern yet
+  // — fall back to a sensible default rather than showing blank badges.
+  const weekdayPattern = plan
+    ? (plan.weekdayPattern && plan.weekdayPattern.length === plan.daysPerWeek ? plan.weekdayPattern : defaultWeekdayPattern(plan.daysPerWeek))
+    : null;
 
   // On opening an active plan, bring the current week into view. Runs when the
   // plan or the current week changes (e.g. a new plan, or a day rolls over).
@@ -290,6 +306,12 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
 
   function handleSwap(weekNumber, dayIndex, newWorkoutId) {
     onSavePlan(swapDayWorkout(plan, weekNumber, dayIndex, newWorkoutId, library));
+  }
+  // Assign one session slot (applies across every week) to a day of the week.
+  function handleSetWeekday(sessionIndex, dayIdx) {
+    const pattern = (weekdayPattern || []).slice();
+    pattern[sessionIndex] = dayIdx;
+    onSavePlan(setWeekdayPattern(plan, pattern));
   }
   function handleCheckin(weekNumber, feedback) {
     onSavePlan(applyCheckin(plan, weekNumber, feedback, library));
@@ -390,13 +412,56 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
         )}
       </div>
 
+      {/* Assign each session to a day of the week */}
+      <div style={{ marginBottom: 16 }}>
+        {!weekdayEditor ? (
+          <button onClick={() => setWeekdayEditor(true)}
+            style={{ fontFamily: FONT_BODY, display: 'flex', alignItems: 'center', gap: 7, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '9px 12px', cursor: 'pointer', color: TEXT, fontSize: 12.5, width: '100%', justifyContent: 'space-between' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+              <CalendarDays size={14} color={SUB} style={{ flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                Scheduled <b style={{ fontWeight: 700 }}>{weekdayPattern.map(d => WEEKDAY_LABELS[d]).join(', ')}</b>
+              </span>
+            </span>
+            <span style={{ color: SUB, fontSize: 12, flexShrink: 0 }}>Change ›</span>
+          </button>
+        ) : (
+          <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+            <div style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: TEXT, fontWeight: 600, marginBottom: 4 }}>Assign days of the week</div>
+            <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 12, lineHeight: 1.5 }}>
+              Pick which day each session lands on — this applies to every week in the plan.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+              {Array.from({ length: plan.daysPerWeek }, (_, i) => i).map(i => (
+                <div key={i}>
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 6 }}>Session {i + 1}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {WEEKDAY_LABELS.map((lbl, d) => {
+                      const active = weekdayPattern[i] === d;
+                      return (
+                        <button key={d} onClick={() => handleSetWeekday(i, d)} disabled={active}
+                          style={{ fontFamily: FONT_BODY, padding: '7px 10px', borderRadius: 8, cursor: active ? 'default' : 'pointer', fontSize: 12.5,
+                            border: `1px solid ${active ? 'var(--accent)' : LINE}`, background: active ? 'var(--accent)' : PANEL2,
+                            color: active ? INK : TEXT, fontWeight: active ? 700 : 500 }}>{lbl}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setWeekdayEditor(false)}
+              style={{ fontFamily: FONT_BODY, background: 'none', border: 'none', color: SUB, fontSize: 12, cursor: 'pointer', padding: 0 }}>Done</button>
+          </div>
+        )}
+      </div>
+
       {/* load bar chart across the plan */}
       <PlanLoadChart weeks={plan.weeks} />
 
       {/* weeks */}
       <div style={{ marginTop: 20 }}>
         {plan.weeks.map((w) => (
-          <WeekCard key={w.weekNumber} week={w} library={library}
+          <WeekCard key={w.weekNumber} week={w} library={library} weekdayPattern={weekdayPattern}
             defaultOpen={w.weekNumber === currentWeek}
             isCurrent={w.weekNumber === currentWeek}
             cardRef={w.weekNumber === currentWeek ? currentWeekRef : null}

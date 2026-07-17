@@ -895,7 +895,59 @@ function enforceTimeBudget(days, budgetSeconds) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. The generator
+// 7. Weekday scheduling
+// ---------------------------------------------------------------------------
+// Sessions are generated as an ordered list per week ("Session 1", "Session
+// 2", ...) with no link to the calendar. This maps each session slot onto an
+// actual day of the week (Monday-start, matching the rest of the app's week
+// bucketing — see the Monday-start helper in App.jsx) so the rider can see
+// "Tuesday: Threshold" instead of just an unordered list. It's a labelling
+// layer only: it doesn't change what gets picked or how the plan is built.
+// ---------------------------------------------------------------------------
+export const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+export const WEEKDAY_LABELS_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// Even spread across the 7-day week as a sensible starting point — e.g. 3
+// sessions -> Mon/Wed/Sat, 4 -> Mon/Wed/Fri/Sat. Riders customise from here.
+export function defaultWeekdayPattern(daysPerWeek) {
+  const n = Math.max(1, Math.min(7, Math.round(daysPerWeek) || 1));
+  if (n >= 7) return [0, 1, 2, 3, 4, 5, 6];
+  const step = 7 / n;
+  const seen = new Set();
+  const pattern = [];
+  for (let i = 0; i < n; i++) {
+    let day = Math.round(i * step) % 7;
+    while (seen.has(day)) day = (day + 1) % 7; // keep the default spread on distinct days
+    seen.add(day);
+    pattern.push(day);
+  }
+  return pattern;
+}
+
+// Keeps a weekday pattern in sync with a (possibly changed) session count,
+// preserving as many of the rider's existing picks as possible: trims from
+// the end if there are now fewer sessions, and pads with unused weekdays
+// (falling back to the default spread) if there are more.
+export function normalizeWeekdayPattern(pattern, daysPerWeek) {
+  const n = Math.max(1, Math.min(7, Math.round(daysPerWeek) || 1));
+  const base = Array.isArray(pattern) ? pattern.filter(d => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  if (base.length >= n) return base.slice(0, n);
+  const used = new Set(base);
+  const fill = defaultWeekdayPattern(n).filter(d => !used.has(d));
+  const next = base.slice();
+  while (next.length < n && fill.length) next.push(fill.shift());
+  while (next.length < n) next.push(defaultWeekdayPattern(n)[next.length % n]); // last-resort fallback
+  return next;
+}
+
+// Rider-driven edit: assign a specific session slot to a specific weekday.
+export function setWeekdayPattern(plan, pattern) {
+  if (!plan) return plan;
+  return { ...plan, weekdayPattern: normalizeWeekdayPattern(pattern, plan.daysPerWeek) };
+}
+
+// ---------------------------------------------------------------------------
+// 8. The generator
 // ---------------------------------------------------------------------------
 export function generatePlan({
   goalKey, totalWeeks, daysPerWeek, weeklyHours,
@@ -1019,6 +1071,7 @@ export function generatePlan({
     currentFtp,
     multiSport,
     weightedDayIndex,
+    weekdayPattern: defaultWeekdayPattern(effectiveDays),
     createdAt: new Date().toISOString(),
     startWeeklyTss,
     weeks,
@@ -1026,7 +1079,7 @@ export function generatePlan({
 }
 
 // ---------------------------------------------------------------------------
-// 8. Plan validation
+// 9. Plan validation
 // ---------------------------------------------------------------------------
 // The safety checklist. A plan that fails any hard rule should never be shown
 // as a finished programme. Returns { ok, errors, warnings }.
@@ -1108,7 +1161,7 @@ export function validatePlan(plan) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Post-generation adjustments (weekly check-in + swaps)
+// 10. Post-generation adjustments (weekly check-in + swaps)
 // ---------------------------------------------------------------------------
 // These keep a live plan honest as the rider progresses. Both re-run the same
 // TSS bookkeeping so the plan's numbers stay accurate.
@@ -1256,7 +1309,7 @@ export function swapDayWorkout(plan, weekNumber, dayIndex, newWorkoutId, library
 }
 
 // ---------------------------------------------------------------------------
-// 9. Plan progress & mid-block adjustments
+// 11. Plan progress & mid-block adjustments
 // ---------------------------------------------------------------------------
 
 // Which week is "now", based on when the plan was created. Week 1 covers the
@@ -1317,6 +1370,7 @@ export function changePlanDaysPerWeek(plan, newDays, fromWeek, library) {
     ...rebuilt,
     daysPerWeek: effectiveDays,
     requestedDays: clamped,
+    weekdayPattern: normalizeWeekdayPattern(plan.weekdayPattern, effectiveDays),
     dayChange: { fromWeek, requested: clamped, applied: effectiveDays, at: new Date().toISOString() },
   };
 }

@@ -2876,22 +2876,32 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
           })}
         </div>
 
-        {(isCustom || isScaled) && (
-          <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
-            {isCustom && (
-              <>
-                <button onClick={onEdit} style={{ flex: '1 1 100px', padding: '12px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}><Edit3 size={16} /> Edit</button>
-                <button onClick={onDelete} style={{ padding: '12px 14px', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: RED, cursor: 'pointer' }}><Trash2 size={16} /></button>
-              </>
-            )}
-            {isScaled && (
-              <button onClick={() => onSaveScaled({ ...workout, id: 'custom-' + newId(), name: `${workout.name} (${targetMinutes}m)`, intervals: scaledIntervals })}
-                style={{ flex: '1 1 140px', padding: '12px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
-                <Save size={16} /> Save as new
-              </button>
-            )}
+        {/* Always mounted (unlike a conditional render) so this row's height
+            animates smoothly instead of the modal abruptly jumping as
+            isScaled flips on/off while dragging the length slider above. */}
+        <div style={{
+          display: 'grid',
+          gridTemplateRows: (isCustom || isScaled) ? '1fr' : '0fr',
+          marginTop: (isCustom || isScaled) ? 18 : 0,
+          transition: 'grid-template-rows 200ms ease, margin-top 200ms ease',
+        }}>
+          <div style={{ overflow: 'hidden', minHeight: 0 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {isCustom && (
+                <>
+                  <button onClick={onEdit} style={{ flex: '1 1 100px', padding: '12px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}><Edit3 size={16} /> Edit</button>
+                  <button onClick={onDelete} style={{ padding: '12px 14px', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: RED, cursor: 'pointer' }}><Trash2 size={16} /></button>
+                </>
+              )}
+              {isScaled && (
+                <button onClick={() => onSaveScaled({ ...workout, id: 'custom-' + newId(), name: `${workout.name} (${targetMinutes}m)`, intervals: scaledIntervals })}
+                  style={{ flex: '1 1 140px', padding: '12px 0', borderRadius: 10, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
+                  <Save size={16} /> Save as new
+                </button>
+              )}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
