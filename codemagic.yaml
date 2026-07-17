@@ -79,6 +79,7 @@ workflows:
       vars:
         PACKAGE_NAME: "app.trbo.trainer"
       node: 22
+      java: 21
     triggering:
       events:
         - push
