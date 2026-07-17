@@ -2049,6 +2049,16 @@ function useBeeper() {
 }
 
 // ---------- trainer connectivity (Web Bluetooth FTMS) ----------
+// Wahoo's proprietary trainer-control characteristic. It isn't a separate
+// BLE service — it lives inside the standard Cycling Power Service (0x1818)
+// alongside the normal power-measurement characteristic, which is why the
+// CPS fallback path below can reach it once FTMS (0x1826) isn't found.
+// Opcodes reverse-engineered and documented by the GoldenCheetah and
+// SwiftySensorsTrainers open-source projects (same approach Zwift and
+// TrainerRoad use for Wahoo ERG support — no Wahoo API agreement involved).
+const WAHOO_CONTROL_UUID = 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b';
+const WAHOO_OP = { unlock: 0x20, setErgMode: 0x42, setSimGrade: 0x46 };
+
 function useTrainer() {
   const [status, setStatus] = useState('disconnected');
   const [deviceName, setDeviceName] = useState(null);
@@ -2144,7 +2154,7 @@ function useTrainer() {
         if (usedFtms) {
           try {
             await nativeWrite(deviceId, ftmsSvc, uuid16(0x2ad9), new Uint8Array([0x00]));
-            controlRef.current = { native: true };
+            controlRef.current = { protocol: 'ftms', native: true, characteristic: null };
             // FTMS "Start or Resume" (0x07). Some trainers' firmware expects
             // this right after "Request Control" before it will honour later
             // mode-change commands — including the "release back to free
@@ -2152,6 +2162,17 @@ function useTrainer() {
             // Missing this step is a likely reason some trainers stay locked
             // in ERG mode after the effort finishes.
             await writeControl(new Uint8Array([0x07]));
+            setHasControl(true);
+          } catch (e) { controlRef.current = null; setHasControl(false); }
+        } else {
+          // No FTMS control point, but some trainers — including this AC59
+          // KICKR SNAP — layer a proprietary control characteristic on top
+          // of the Cycling Power Service instead. Try it before giving up
+          // on ERG control entirely.
+          try {
+            await nativeStartNotifications(deviceId, cpsSvc, WAHOO_CONTROL_UUID, () => {}).catch(() => {});
+            await nativeWrite(deviceId, cpsSvc, WAHOO_CONTROL_UUID, new Uint8Array([WAHOO_OP.unlock, 0xee, 0xfc]));
+            controlRef.current = { protocol: 'wahoo', native: true, characteristic: null };
             setHasControl(true);
           } catch (e) { controlRef.current = null; setHasControl(false); }
         }
@@ -2184,7 +2205,7 @@ function useTrainer() {
         try {
           const controlChar = await service.getCharacteristic(0x2ad9);
           await controlChar.writeValue(new Uint8Array([0x00]));
-          controlRef.current = controlChar;
+          controlRef.current = { protocol: 'ftms', native: false, characteristic: controlChar };
           // See the matching comment in the native connect path above.
           await writeControl(new Uint8Array([0x07]));
           setHasControl(true);
@@ -2197,6 +2218,17 @@ function useTrainer() {
         } catch (e) {}
         controlRef.current = null;
         setHasControl(false);
+        // No FTMS control point, but some trainers — including this AC59
+        // KICKR SNAP — layer a proprietary control characteristic on top
+        // of the same Cycling Power Service instead. Try it before giving
+        // up on ERG control entirely.
+        try {
+          const wahooChar = await service.getCharacteristic(WAHOO_CONTROL_UUID);
+          await wahooChar.startNotifications().catch(() => {});
+          await wahooChar.writeValue(new Uint8Array([WAHOO_OP.unlock, 0xee, 0xfc]));
+          controlRef.current = { protocol: 'wahoo', native: false, characteristic: wahooChar };
+          setHasControl(true);
+        } catch (e) { controlRef.current = null; setHasControl(false); }
       }
       deviceRef.current = device;
       setDeviceName(device.name || 'Trainer');
@@ -2224,19 +2256,32 @@ function useTrainer() {
     // the trainer" fired at almost the same moment. Bluetooth doesn't
     // guarantee two back-to-back writes land in the order they were sent
     // unless the app explicitly waits for each one to finish first.
-    const run = () => (controlRef.current.native
-      ? nativeWrite(nativeIdRef.current, uuid16(0x1826), uuid16(0x2ad9), buf)
-      : controlRef.current.writeValue(buf));
+    // Routes to the right service/characteristic for whichever control
+    // protocol this trainer connected with — FTMS's dedicated control point,
+    // or Wahoo's proprietary characteristic nested inside the Cycling Power
+    // Service — since the two need entirely different opcodes/byte layouts.
+    const { protocol, native, characteristic } = controlRef.current;
+    const svcUuid = protocol === 'wahoo' ? uuid16(0x1818) : uuid16(0x1826);
+    const charUuid = protocol === 'wahoo' ? WAHOO_CONTROL_UUID : uuid16(0x2ad9);
+    const run = () => (native
+      ? nativeWrite(nativeIdRef.current, svcUuid, charUuid, buf)
+      : characteristic.writeValue(buf));
     const next = writeQueueRef.current.then(run, run);
     writeQueueRef.current = next.catch(() => {});
     return next;
   }
   async function setErgTarget(watts) {
     try {
+      const w = Math.max(0, Math.round(watts));
+      if (controlRef.current && controlRef.current.protocol === 'wahoo') {
+        // Wahoo Set ERG Mode (opcode 0x42): uint16, little-endian, watts.
+        await writeControl(new Uint8Array([WAHOO_OP.setErgMode, w & 0xff, (w >> 8) & 0xff]));
+        return;
+      }
       const buf = new ArrayBuffer(3);
       const dv = new DataView(buf);
       dv.setUint8(0, 0x05);
-      dv.setInt16(1, Math.round(watts), true);
+      dv.setInt16(1, w, true);
       await writeControl(buf);
     } catch (e) {}
   }
@@ -2246,6 +2291,15 @@ function useTrainer() {
   // Pros the trainer isn't left holding a target the rider can't vary.
   async function endErg() {
     try {
+      if (controlRef.current && controlRef.current.protocol === 'wahoo') {
+        // Wahoo has no single "zero out simulation" write like FTMS does.
+        // Sending Set Simulation Grade (0x46) at 0% takes the trainer out
+        // of its ERG hold and into grade-based resistance instead, which is
+        // the closest equivalent "free ride" state. Grade is normalized
+        // across the full uint16 range, where the midpoint (0x7FFF) is 0%.
+        await writeControl(new Uint8Array([WAHOO_OP.setSimGrade, 0xff, 0x7f]));
+        return;
+      }
       // FTMS Set Indoor Bike Simulation Parameters (0x11), all values zero.
       await writeControl(new Uint8Array([0x11, 0, 0, 0, 0, 0, 0]));
     } catch (e) {}
