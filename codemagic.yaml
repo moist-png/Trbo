@@ -19,6 +19,7 @@ workflows:
       branch_patterns:
         - pattern: main
           include: true
+      cancel_previous_builds: true
     when:
       changeset:
         excludes:
@@ -84,6 +85,7 @@ workflows:
       branch_patterns:
         - pattern: main
           include: true
+      cancel_previous_builds: true
     when:
       changeset:
         excludes:
