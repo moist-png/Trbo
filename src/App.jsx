@@ -354,10 +354,50 @@ function findSignatureModule(originalIntervals, classes, groups) {
     .map((it, idx) => ({ it, cls: classes[idx] }))
     .filter(x => x.cls === 'base' && x.it.duration >= 180 &&
       ((x.it.type === 'power' && x.it.target >= 80) || (x.it.type === 'rpe' && x.it.target >= 6)));
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => (b.it.target || 0) - (a.it.target || 0));
-  const template = candidates[0].it;
-  return { duration: template.duration, build: () => [{ ...template, id: newId() }] };
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => (b.it.target || 0) - (a.it.target || 0));
+    const template = candidates[0].it;
+    return { duration: template.duration, build: () => [{ ...template, id: newId() }] };
+  }
+  // Fallback for short/sharp workouts with no steady "base" block and no
+  // repeating group — e.g. Sprint Ladder, where every rung is a different
+  // length so nothing above ever matches. Reuses the workout's own labeled
+  // "Sprint — Ns" rungs (each paired with the recovery right after it) as
+  // filler instead of generic Endurance riding, so extending the ride adds
+  // more real sprint work. Skips the shortest and longest rung — the
+  // ladder's two extremes — and cycles through whatever's left (e.g. the
+  // 10s/15s rungs), so growing the ride deepens the middle of the ladder
+  // rather than making the hardest/shortest effort even more frequent.
+  const rungs = [];
+  for (let i = 0; i < originalIntervals.length - 1; i++) {
+    const it = originalIntervals[i];
+    if (classes[i] === 'anchor' && classes[i + 1] === 'rest' && /^sprint\b/i.test((it.label || '').trim())) {
+      rungs.push({ work: it, rest: originalIntervals[i + 1] });
+    }
+  }
+  if (rungs.length === 0) return null;
+  const durations = rungs.map(p => p.work.duration);
+  const minDur = Math.min(...durations), maxDur = Math.max(...durations);
+  let middle = rungs.filter(p => p.work.duration !== minDur && p.work.duration !== maxDur);
+  if (middle.length === 0) middle = rungs;
+  const unitDuration = middle.reduce((a, p) => a + p.work.duration + p.rest.duration, 0) / middle.length;
+  let cursor = 0;
+  return {
+    duration: unitDuration,
+    // A rung is a few minutes, not the ~20min a mountain-ride "lap" is — so
+    // it should reappear roughly every couple of rung-lengths of extra time
+    // requested, not gate on a full extra hour the way buildLongExtension's
+    // default spacing does. Also allow more of them before falling back to
+    // plain Endurance, since a sprint session extended by an hour-plus
+    // should mostly be more sprints, not steady riding.
+    spacing: Math.max(300, unitDuration * 1.5),
+    maxExtra: 8,
+    build: () => {
+      const p = middle[cursor % middle.length];
+      cursor += 1;
+      return [{ ...p.work, id: newId() }, { ...p.rest, id: newId() }];
+    },
+  };
 }
 
 // Fills the time a workout still needs once reps/stretching are maxed out.
@@ -371,8 +411,9 @@ function buildLongExtension(diff, targetSeconds, origTotal, module) {
   let remaining = diff;
   const extraModules = [];
   if (module && module.duration > 0) {
-    const spacing = 60 * 60;
-    const desiredExtra = Math.min(4, Math.floor(Math.max(0, targetSeconds - origTotal) / spacing));
+    const spacing = module.spacing || 60 * 60;
+    const maxExtra = module.maxExtra || 4;
+    const desiredExtra = Math.min(maxExtra, Math.floor(Math.max(0, targetSeconds - origTotal) / spacing));
     while (extraModules.length < desiredExtra && remaining > module.duration * 0.9) {
       extraModules.push(module.build());
       remaining -= module.duration;
@@ -570,18 +611,29 @@ function smartScaleWorkout(originalIntervals, targetSeconds, repeatWholeCore) {
     }
   } else if (diff < 0) {
     let need = -diff;
-    // 1) remove whole reps from the biggest repeat groups first, floor at 1 rep
-    let safety = 0;
-    while (need > 0 && safety < 500) {
-      safety++;
-      const candidates = groups.filter(g => g.reps > 1);
-      if (candidates.length === 0) break;
-      candidates.sort((a, b) => b.reps - a.reps);
-      const g = candidates[0];
-      const unitDur = totalDuration(g.items);
-      if (unitDur <= 0) break;
-      g.reps -= 1;
-      need -= unitDur;
+    // 1) remove whole reps from repeat groups. Rather than trimming every
+    //    group evenly (which leaves several thinned-out blocks), drain the
+    //    smaller group(s) toward zero — dropping them out of the ride
+    //    entirely if there's enough to shed — before touching the biggest
+    //    group at all. The biggest group is treated as the workout's
+    //    signature set and always keeps at least 1 rep, so shortening a
+    //    ride collapses the minor blocks first and leaves one solid set
+    //    of work rather than two weak ones.
+    if (groups.length > 0) {
+      const order = groups
+        .map((g, gi) => ({ g, gi, origDur: totalDuration(g.items) * g.origReps }))
+        .sort((a, b) => a.origDur - b.origDur);
+      const primaryGi = order[order.length - 1].gi;
+      for (const { g, gi } of order) {
+        if (need <= 0) break;
+        const unitDur = totalDuration(g.items);
+        if (unitDur <= 0) continue;
+        const floorReps = gi === primaryGi ? 1 : 0;
+        while (need > 0 && g.reps > floorReps) {
+          g.reps -= 1;
+          need -= unitDur;
+        }
+      }
     }
     // 2) shrink flexible standalone blocks down to their floors
     let flexIdx = flexibleIndices(['base', 'warmup', 'cooldown']);
@@ -2756,7 +2808,18 @@ function FtpInput({ ftp, setFtp, style }) {
 function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdit, isCustom, onDelete, onSaveScaled, presetMinutes, starred, onToggleStar, inQueue, onToggleQueue }) {
   const originalTotal = totalDuration(workout.intervals);
   const scalable = !workout.fixedLength;
-  const initialMinutes = scalable && presetMinutes ? Math.max(10, Math.round(presetMinutes)) : Math.max(10, Math.round(originalTotal / 60));
+  // The floor this specific workout can actually reach — long, multi-climb
+  // epics especially run out of room to compress well above the slider's
+  // nominal 10-minute minimum. Scaling toward a near-zero target finds
+  // exactly how far the engine can shrink it, so the slider can stop there
+  // instead of letting the person drag past the point where "actual" stops
+  // changing.
+  const floorSeconds = useMemo(
+    () => (scalable ? totalDuration(smartScaleWorkout(workout.intervals, 1, workout.repeatWholeCore)) : originalTotal),
+    [workout, scalable]
+  );
+  const floorMinutes = Math.max(10, Math.ceil(floorSeconds / 60));
+  const initialMinutes = scalable && presetMinutes ? Math.max(floorMinutes, Math.round(presetMinutes)) : Math.max(floorMinutes, Math.round(originalTotal / 60));
   const [targetMinutes, setTargetMinutes] = useState(initialMinutes);
   useEffect(() => { setTargetMinutes(initialMinutes); }, [workout.id, presetMinutes]);
 
@@ -2797,14 +2860,14 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
               <span>Adjust length</span>
               <span style={{ color: TEXT }}>{targetMinutes} min{isScaled ? ` → ${fmtLong(actualTotal)} actual` : ''}</span>
             </div>
-            <input type="range" min={10} max={360} step={5} value={targetMinutes}
+            <input type="range" min={floorMinutes} max={360} step={5} value={targetMinutes}
               onChange={e => setTargetMinutes(Number(e.target.value))}
               style={{ width: '100%', accentColor: settings.accentColor }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: SUB, marginTop: 2 }}>
-              <span>10 min</span><span>6 hours</span>
+              <span>{floorMinutes > 10 ? fmtLong(floorMinutes * 60) : '10 min'}</span><span>6 hours</span>
             </div>
             {isScaled && (
-              <button onClick={() => setTargetMinutes(Math.max(10, Math.round(originalTotal / 60)))}
+              <button onClick={() => setTargetMinutes(Math.max(floorMinutes, Math.round(originalTotal / 60)))}
                 style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
                 Reset to original length
               </button>
