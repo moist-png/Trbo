@@ -19,10 +19,10 @@ workflows:
       branch_patterns:
         - pattern: main
           include: true
-      when:
-        changeset:
-          excludes:
-            - 'android/'
+    when:
+      changeset:
+        excludes:
+          - 'android/'
     scripts:
       - name: Install npm dependencies
         script: npm ci
@@ -84,10 +84,10 @@ workflows:
       branch_patterns:
         - pattern: main
           include: true
-      when:
-        changeset:
-          excludes:
-            - 'ios/'
+    when:
+      changeset:
+        excludes:
+          - 'ios/'
     scripts:
       - name: Install npm dependencies
         script: npm ci
