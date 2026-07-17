@@ -337,6 +337,18 @@ export function estimateWorkoutTss(intervals) {
   return Math.round(tss);
 }
 
+// Fallback TSS estimate for a ride with no power data at all — e.g. a
+// confirmed outdoor ride logged after the fact. Uses the same RPE→intensity
+// table and TSS formula as estimateWorkoutTss above, just applied as one flat
+// intensity across the whole duration rather than per-interval, so an
+// outdoor ride's estimated load sits on the same scale as everything else
+// feeding the planner's ramp instead of a second, inconsistent formula.
+export function estimateOutdoorTss(durationSeconds, rpe) {
+  if (!durationSeconds || durationSeconds <= 0) return 0;
+  const ifactor = rpeToIntensityFactor(rpe);
+  return Math.round((durationSeconds / 3600) * ifactor * ifactor * 100);
+}
+
 // ---------------------------------------------------------------------------
 // 3. Goal definitions
 // ---------------------------------------------------------------------------
@@ -469,17 +481,26 @@ const RAMP = {
   // riders get the gentler 5%.
   maxRampSolo: 0.08,
   maxRampMulti: 0.05,
+  // Riders new to structured training ramp load more conservatively too —
+  // not because they can't handle volume, but because connective tissue and
+  // movement economy lag behind early cardiovascular gains. Takes whichever
+  // cap is lower rather than stacking with the multi-sport discount.
+  maxRampNewRider: 0.05,
   recoveryMultiplier: 0.55, // deload week = ~55% of the week before
   taperMultiplier: 0.5,     // taper weeks shed volume
   peakMultiplier: 0.85,     // peak eases volume vs late build
 };
 
+// `trainingAge` (optional): 'new' | 'developing' | 'established' — a coarse,
+// self-reported bucket rather than exact years, so it reads as a skill level
+// and not a number worth storing. Only 'new' changes anything right now.
 // `lockedTargets` (optional): an array the same length as phaseByWeek where a
 // non-null entry means "this week's target is fixed" (used when re-planning
 // after a check-in — the weeks already ridden stay put, and the ramp continues
 // smoothly from the last locked loading week).
-export function weeklyLoadTargets({ startWeeklyTss, phaseByWeek, recoveryFlags, multiSport, lockedTargets }) {
-  const maxRamp = multiSport ? RAMP.maxRampMulti : RAMP.maxRampSolo;
+export function weeklyLoadTargets({ startWeeklyTss, phaseByWeek, recoveryFlags, multiSport, trainingAge, lockedTargets }) {
+  let maxRamp = multiSport ? RAMP.maxRampMulti : RAMP.maxRampSolo;
+  if (trainingAge === 'new') maxRamp = Math.min(maxRamp, RAMP.maxRampNewRider);
   const targets = [];
   let lastLoadingLoad = startWeeklyTss; // the last non-recovery, non-taper load
   phaseByWeek.forEach((phase, i) => {
@@ -529,7 +550,7 @@ export function weeklyLoadTargets({ startWeeklyTss, phaseByWeek, recoveryFlags, 
 // from over-committing the week's time budget before a single workout is
 // even picked. Without them the function still works, it just can't apply
 // the time-budget check.
-export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSport, library, weeklySecondsBudget }) {
+export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSport, riderAgeBand, library, weeklySecondsBudget }) {
   if (isRecovery) {
     // Deload: mostly recovery + easy endurance, at most one light quality day.
     const slots = [];
@@ -602,7 +623,11 @@ export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSp
 
 
   // Multi-sport riders get one fewer hard day (extra recovery headroom).
-  const maxHardDays = Math.max(1, Math.floor(days * (multiSport ? 0.35 : 0.5)));
+  // 55+ gets a modest further trim too — recovery capacity is the one thing
+  // that reliably tracks with age even though individual variation is huge,
+  // so this is a light nudge, not a hard rule.
+  const ageHardDayFactor = riderAgeBand === '55plus' ? 0.85 : 1;
+  const maxHardDays = Math.max(1, Math.floor(days * (multiSport ? 0.35 : 0.5) * ageHardDayFactor));
   const availableForFixed = weeklySecondsBudget ? Math.max(0, weeklySecondsBudget - MIN_FLEX_RESERVE) : Infinity;
 
   const slots = [];
@@ -947,11 +972,54 @@ export function setWeekdayPattern(plan, pattern) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. The generator
+// 8. Macrocycle chaining
+// ---------------------------------------------------------------------------
+// Every finished plan gets archived with its full week-by-week shape intact
+// (see archivePlan in App.jsx), so a new plan doesn't have to start from a
+// flat guess every time. This reads the most recent archived plan and works
+// out (a) what load it was actually holding by the end, and (b) whether it's
+// safe to treat the new plan as a direct continuation of the same macrocycle
+// or whether a gap/off-season should be assumed instead — using whether the
+// rider said, when that plan was created, that they were going straight into
+// another block afterward (see `continuesAfter` on the plan) plus how long
+// it's actually been since it was archived, rather than guessing from the
+// phase alone.
+// ---------------------------------------------------------------------------
+export function planContinuationHint(archivedPlans) {
+  if (!archivedPlans || !archivedPlans.length) return null;
+  const last = archivedPlans[0]; // caller keeps these sorted newest-first
+  const plan = last && last.plan;
+  if (!plan || !plan.weeks || !plan.weeks.length) return null;
+
+  const loadingWeeks = plan.weeks.filter(w => w.phase !== 'taper' && !w.isRecovery);
+  const lastLoadingTss = loadingWeeks.length
+    ? loadingWeeks[loadingWeeks.length - 1].plannedTss
+    : plan.startWeeklyTss;
+  const lastPhase = plan.weeks[plan.weeks.length - 1].phase;
+
+  const archivedAt = last.archivedAt ? new Date(last.archivedAt) : null;
+  const weeksSince = archivedAt ? Math.max(0, (Date.now() - archivedAt.getTime()) / (7 * 24 * 3600 * 1000)) : 99;
+
+  // Told us explicitly they're carrying straight on, and it's recent enough
+  // for that to actually be true — trust it and chain the ramp smoothly.
+  const isDirectContinuation = plan.continuesAfter === true && weeksSince <= 3;
+
+  // Just came off a peak/taper (i.e. an event) without saying they're
+  // continuing straight on, or it's been long enough that fitness has likely
+  // faded either way — default to a gentler restart rather than assuming
+  // they held form through the gap.
+  const suggestEasedStart = !isDirectContinuation && (lastPhase === 'taper' || lastPhase === 'peak' || weeksSince > 3);
+
+  return { lastLoadingTss, lastPhase, weeksSince: Math.round(weeksSince), isDirectContinuation, suggestEasedStart };
+}
+
+// ---------------------------------------------------------------------------
+// 9. The generator
 // ---------------------------------------------------------------------------
 export function generatePlan({
   goalKey, totalWeeks, daysPerWeek, weeklyHours,
   currentFtp, recentWeeklyTss, multiSport, library, weightedDayIndex = null,
+  trainingAge = null, riderAgeBand = null, continuesAfter = null, continuationHint = null,
 }) {
   const goal = GOALS[goalKey] || GOALS['general-fitness'];
   const hasEvent = goal.hasEvent;
@@ -969,11 +1037,28 @@ export function generatePlan({
   startWeeklyTss = Math.min(startWeeklyTss, Math.round(hoursBasedTss * 1.15));
   startWeeklyTss = Math.max(120, startWeeklyTss);
 
+  // Macrocycle chaining: if the last plan's shape tells us this is a genuine
+  // continuation (they said so, and it's recent), let the ramp pick up close
+  // to where that plan left off instead of restarting from a flat guess. If
+  // it looks like a real gap or they just came off a taper/peak without
+  // saying they're carrying straight on, ease the start down instead of
+  // assuming fitness held through the break.
+  if (continuationHint && continuationHint.lastLoadingTss) {
+    if (continuationHint.isDirectContinuation) {
+      startWeeklyTss = Math.max(startWeeklyTss, Math.round(continuationHint.lastLoadingTss * 0.9));
+    } else if (continuationHint.suggestEasedStart) {
+      startWeeklyTss = Math.round(Math.min(startWeeklyTss, continuationHint.lastLoadingTss) * 0.8);
+    }
+  }
+
   const phaseByWeek = planPhases(totalWeeks, hasEvent);
-  // Multi-sport riders deload every 3 weeks; solo riders every 4.
-  const cadence = multiSport ? 3 : 4;
+  // Multi-sport riders deload every 3 weeks; solo riders every 4. 55+ gets
+  // one week knocked off whatever cadence applies — same light-touch nudge
+  // as the hard-day trim above, not a hard rule.
+  let cadence = multiSport ? 3 : 4;
+  if (riderAgeBand === '55plus') cadence = Math.max(2, cadence - 1);
   const recoveryFlags = recoveryWeekFlags(phaseByWeek, cadence);
-  const loadTargets = weeklyLoadTargets({ startWeeklyTss, phaseByWeek, recoveryFlags, multiSport });
+  const loadTargets = weeklyLoadTargets({ startWeeklyTss, phaseByWeek, recoveryFlags, multiSport, trainingAge });
 
   const weeklySecondsBudget = (weeklyHours || 4) * 3600;
 
@@ -995,7 +1080,7 @@ export function generatePlan({
 
   const weeks = phaseByWeek.map((phase, wi) => {
     const isRecovery = recoveryFlags[wi];
-    let purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, library, weeklySecondsBudget });
+    let purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, riderAgeBand, library, weeklySecondsBudget });
     purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     // The weighted "big day" is always an endurance session -- the one
     // purpose type that's both length-flexible and safe to scale up without
@@ -1074,12 +1159,15 @@ export function generatePlan({
     weekdayPattern: defaultWeekdayPattern(effectiveDays),
     createdAt: new Date().toISOString(),
     startWeeklyTss,
+    // Only stored so a *future* plan can read it back via
+    // planContinuationHint — this plan's own generation doesn't use it.
+    continuesAfter,
     weeks,
   };
 }
 
 // ---------------------------------------------------------------------------
-// 9. Plan validation
+// 10. Plan validation
 // ---------------------------------------------------------------------------
 // The safety checklist. A plan that fails any hard rule should never be shown
 // as a finished programme. Returns { ok, errors, warnings }.
@@ -1161,7 +1249,7 @@ export function validatePlan(plan) {
 }
 
 // ---------------------------------------------------------------------------
-// 10. Post-generation adjustments (weekly check-in + swaps)
+// 11. Post-generation adjustments (weekly check-in + swaps)
 // ---------------------------------------------------------------------------
 // These keep a live plan honest as the rider progresses. Both re-run the same
 // TSS bookkeeping so the plan's numbers stay accurate.
@@ -1309,7 +1397,7 @@ export function swapDayWorkout(plan, weekNumber, dayIndex, newWorkoutId, library
 }
 
 // ---------------------------------------------------------------------------
-// 11. Plan progress & mid-block adjustments
+// 12. Plan progress & mid-block adjustments
 // ---------------------------------------------------------------------------
 
 // Which week is "now", based on when the plan was created. Week 1 covers the

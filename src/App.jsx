@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import PlannerView from './PlannerView';
-import { currentPlanWeek, PHASE, WORKOUT_PURPOSE } from './planner';
+import { currentPlanWeek, PHASE, WORKOUT_PURPOSE, estimateOutdoorTss } from './planner';
 import { TrboMark } from './PublicPages';
 import { MiniGamesView, MiniGamePlayer, BEAT_THE_PROS } from './MiniGames';
 import FeedbackView, { FeedbackHeroCard } from './Feedback';
@@ -6484,23 +6484,33 @@ export default function App() {
   // Heart rate is intentionally absent from everything below. It is displayed
   // live during a ride and included in the file the rider exports themselves,
   // but it is never written to our database and never sent to Strava.
-  function recordWorkoutSession({ workoutId, name, category, duration, completed, avgPower, maxPower, tss, calories }) {
-    const entry = { id: newId(), date: new Date().toISOString(), workoutId, name, category, duration, completed, avgPower, maxPower, tss, calories };
+  function recordWorkoutSession({ workoutId, name, category, duration, completed, avgPower, maxPower, tss, calories, outdoor, rpe }) {
+    const entry = { id: newId(), date: new Date().toISOString(), workoutId, name, category, duration, completed, avgPower, maxPower, tss, calories, outdoor: !!outdoor, rpe: rpe ?? null };
     setWorkoutHistory(list => [...list, entry]);
     if (user) supabase.from('workout_history').insert({
       id: entry.id, user_id: user.id, workout_id: workoutId, name, category, duration, completed, date: entry.date,
       avg_power: avgPower ?? null, max_power: maxPower ?? null,
       tss: tss ?? null, calories: calories ?? null,
+      outdoor: !!outdoor, rpe: rpe ?? null,
     }).then(() => {});
     // Only push genuinely finished rides of real length to Strava — not
-    // aborted attempts — and only for people who've connected their account.
-    if (user && completed && duration >= 60 && profile && profile.strava_athlete_id) {
+    // aborted attempts, and not confirmed-outdoor entries, since those were
+    // ridden outside the app and the rider's own head unit/computer has
+    // almost certainly already uploaded that ride itself.
+    if (user && completed && !outdoor && duration >= 60 && profile && profile.strava_athlete_id) {
       apiFetch('/api/strava-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, durationSeconds: duration, date: entry.date, avgPower, maxPower }),
       }).catch(() => {});
     }
+  }
+  // A confirmed outdoor ride logged after the fact (no live session, so no
+  // power data) — duration + RPE feed estimateOutdoorTss for a fallback load
+  // estimate, so the ride still counts toward the rider's training load.
+  function logOutdoorRide({ workoutId, name, category, durationSeconds, rpe }) {
+    const tss = estimateOutdoorTss(durationSeconds, rpe);
+    recordWorkoutSession({ workoutId, name, category, duration: durationSeconds, completed: true, avgPower: null, maxPower: null, tss, calories: null, outdoor: true, rpe });
   }
   function clearWorkoutHistory() {
     setWorkoutHistory([]);
@@ -6879,7 +6889,7 @@ export default function App() {
             {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" starredIds={starredIds} onToggleStar={toggleStar} />}
             {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" starredIds={starredIds} onToggleStar={toggleStar} />}
             {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
-            {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} />}
+            {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} onLogOutdoor={logOutdoorRide} />}
             {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} />}
             {view === 'queue' && <QueueView queue={queue} customWorkouts={customWorkouts} onOpen={setDetailWorkout} onRemove={removeFromQueue} onReorder={reorderQueue} onClear={clearQueue} onStartQueue={startQueue} savedQueues={savedQueues} maxSavedQueues={MAX_SAVED_QUEUES} maxSavedQueueWorkouts={MAX_SAVED_QUEUE_WORKOUTS} onSaveQueue={saveQueueAs} onLoadSavedQueue={loadSavedQueue} onDeleteSavedQueue={deleteSavedQueue} lastRemovedQueueItem={lastRemovedQueueItem} onUndoRemove={undoRemoveFromQueue} />}
             {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}

@@ -161,6 +161,13 @@ for each row execute function public.protect_service_only_columns();
 alter table public.workout_history add column if not exists avg_power integer;
 alter table public.workout_history add column if not exists max_power integer;
 
+-- 7a. Confirmed outdoor rides: logged after the fact rather than followed
+--     live, so there's no captured power stream. `rpe` (1-10) is only ever
+--     used to estimate a fallback TSS at log time (see estimateOutdoorTss in
+--     planner.js) so the ride still counts toward training load.
+alter table public.workout_history add column if not exists outdoor boolean default false;
+alter table public.workout_history add column if not exists rpe integer;
+
 -- 7b. Heart rate is NOT stored. Trbo reads heart rate over Bluetooth and shows
 --     it live during a ride, and includes it in the file a rider exports to
 --     their own device, but it is never written to this database. These two

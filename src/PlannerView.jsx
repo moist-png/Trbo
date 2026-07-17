@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef, useContext } from 'react';
-import { CalendarDays, ChevronRight, ChevronDown, ChevronUp, Play, RefreshCw, Trash2, Target, Flag, TrendingUp, Check, X } from 'lucide-react';
+import { CalendarDays, ChevronRight, ChevronDown, ChevronUp, Play, RefreshCw, Trash2, Target, Flag, TrendingUp, Check, X, Sun } from 'lucide-react';
 import {
   GOALS, PHASE, PURPOSE_LABEL, WORKOUT_PURPOSE,
   generatePlan, validatePlan, swapOptionsForPurpose, swapDayWorkout, applyCheckin,
-  estimateWorkoutTss, currentPlanWeek, isPlanComplete, changePlanDaysPerWeek,
+  estimateWorkoutTss, estimateOutdoorTss, currentPlanWeek, isPlanComplete, changePlanDaysPerWeek,
+  planContinuationHint,
   WEEKDAY_LABELS, WEEKDAY_LABELS_FULL, defaultWeekdayPattern, setWeekdayPattern,
 } from './planner';
 import { ColorblindContext } from './colorblindContext';
@@ -27,6 +28,20 @@ function fmtLong(sec) {
   return `${m} min`;
 }
 
+// Training age and actual age only ever shape plan generation on this
+// device — they're never sent to Supabase. Same treatment as Mini Games'
+// personal bests: local to the device, gone on reinstall, never synced.
+const RIDER_PROFILE_KEY = 'trbo_rider_profile_v1';
+function loadRiderProfile() {
+  try { return JSON.parse(localStorage.getItem(RIDER_PROFILE_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveRiderProfile(patch) {
+  try {
+    const current = loadRiderProfile();
+    localStorage.setItem(RIDER_PROFILE_KEY, JSON.stringify({ ...current, ...patch }));
+  } catch (e) { /* ignore — localStorage unavailable */ }
+}
+
 // A small colour per phase so the week list reads at a glance. The
 // colourblind set keeps the same low-to-high intensity ordering (taper is
 // the easiest phase, peak the hardest) using the same Okabe-Ito-derived
@@ -43,7 +58,7 @@ const PHASE_COLOR_CVD = {
 // 3-4 visible questions — FTP and starting fitness come from the rider's own
 // history, passed in as props, not asked here.
 // ---------------------------------------------------------------------------
-function PlannerSetup({ ftp, recentWeeklyTss, onGenerate }) {
+function PlannerSetup({ ftp, recentWeeklyTss, archivedPlans, onGenerate }) {
   const [goalKey, setGoalKey] = useState('general-fitness');
   const [weeks, setWeeks] = useState(8);
   const [days, setDays] = useState(4);
@@ -51,6 +66,13 @@ function PlannerSetup({ ftp, recentWeeklyTss, onGenerate }) {
   const [multiSport, setMultiSport] = useState(false);
   const [weightDay, setWeightDay] = useState(false);
   const [weightedDayIndex, setWeightedDayIndex] = useState(days - 1); // defaults to the last session of the week
+  // Loaded once from this device's local storage — never sent to Supabase.
+  const [riderProfile] = useState(loadRiderProfile);
+  const [trainingAge, setTrainingAge] = useState(riderProfile.trainingAge || null);
+  const [riderAgeBand, setRiderAgeBand] = useState(riderProfile.riderAgeBand || null);
+  const [continuesAfter, setContinuesAfter] = useState(null);
+
+  const continuationHint = useMemo(() => planContinuationHint(archivedPlans), [archivedPlans]);
 
   // If the day count changes while the weighted-day picker is showing a now
   // out-of-range session number, pull it back in range rather than pointing
@@ -88,6 +110,47 @@ function PlannerSetup({ ftp, recentWeeklyTss, onGenerate }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
         {[4, 6, 8, 12, 16].map(w => (
           <button key={w} onClick={() => setWeeks(w)} style={chip(weeks === w)}>{w} weeks</button>
+        ))}
+      </div>
+
+      {/* After-event chaining: only meaningful for plans that end with an
+          event. Asked directly rather than inferred, so a plan never
+          silently assumes a break — or a continuation — that wasn't real. */}
+      {goal.hasEvent && (
+        <>
+          <div style={sectionLabel}>After your event, what's next?</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
+            <button onClick={() => setContinuesAfter(true)} style={chip(continuesAfter === true)}>Straight into another block</button>
+            <button onClick={() => setContinuesAfter(false)} style={chip(continuesAfter === false)}>Taking a break after</button>
+          </div>
+        </>
+      )}
+
+      {/* Training age: a skill-level bucket, not a number of years — shapes
+          how conservatively the weekly load ramps. Kept on this device only. */}
+      <div style={sectionLabel}>How long have you been training with structure?</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
+        {[
+          { key: 'new', label: 'New to it' },
+          { key: 'developing', label: '1–3 years' },
+          { key: 'established', label: '3+ years' },
+        ].map(o => (
+          <button key={o.key} onClick={() => { setTrainingAge(o.key); saveRiderProfile({ trainingAge: o.key }); }} style={chip(trainingAge === o.key)}>{o.label}</button>
+        ))}
+      </div>
+
+      {/* Actual age: optional, only nudges recovery-day spacing. Not stored
+          server-side — age isn't health data, but there's no reason to hold
+          it anywhere beyond what shapes this plan on this device. */}
+      <div style={sectionLabel}>Your age band <span style={{ textTransform: 'none', fontWeight: 500 }}>(optional — only affects recovery spacing, kept on this device)</span></div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
+        {[
+          { key: null, label: 'Prefer not to say' },
+          { key: 'under40', label: 'Under 40' },
+          { key: '40to55', label: '40–55' },
+          { key: '55plus', label: '55+' },
+        ].map(o => (
+          <button key={String(o.key)} onClick={() => { setRiderAgeBand(o.key); saveRiderProfile({ riderAgeBand: o.key }); }} style={chip(riderAgeBand === o.key)}>{o.label}</button>
         ))}
       </div>
 
@@ -144,9 +207,15 @@ function PlannerSetup({ ftp, recentWeeklyTss, onGenerate }) {
         {recentWeeklyTss > 0
           ? <> and your recent training load (about <span style={{ fontFamily: FONT_NUM, color: TEXT, fontWeight: 600 }}>{Math.round(recentWeeklyTss)} TSS/week</span>).</>
           : <>. Once you've logged a few rides, plans will also tune to your recent training load.</>}
+        {continuationHint && continuationHint.isDirectContinuation && (
+          <> Picking up from your last plan — this one ramps on from roughly where that block left off.</>
+        )}
+        {continuationHint && continuationHint.suggestEasedStart && (
+          <> {continuationHint.weeksSince <= 3 ? "You just came off a peak/taper, so" : `It's been about ${continuationHint.weeksSince} weeks since your last plan, so`} this one starts a bit easier and ramps back up from there.</>
+        )}
       </div>
 
-      <button onClick={() => onGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex: weightDay ? weightedDayIndex : null })}
+      <button onClick={() => onGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex: weightDay ? weightedDayIndex : null, trainingAge, riderAgeBand, continuesAfter: goal.hasEvent ? continuesAfter : null, continuationHint })}
         style={{ fontFamily: FONT_BODY, width: '100%', padding: '13px 0', borderRadius: 12, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         <CalendarDays size={18} /> Build my plan
       </button>
@@ -159,11 +228,25 @@ function PlannerSetup({ ftp, recentWeeklyTss, onGenerate }) {
 // detail sheet as everywhere else). Tapping "Swap" opens the same-purpose
 // picker.
 // ---------------------------------------------------------------------------
-function DayRow({ day, weekday, library, onOpen, onSwap }) {
+function DayRow({ day, weekday, library, onOpen, onSwap, onLogOutdoor }) {
   const [swapping, setSwapping] = useState(false);
+  const [loggingOutdoor, setLoggingOutdoor] = useState(false);
+  const [outdoorLogged, setOutdoorLogged] = useState(false);
+  const [outdoorMinutes, setOutdoorMinutes] = useState(Math.round((day.plannedSeconds || 1800) / 60));
+  const [outdoorRpe, setOutdoorRpe] = useState(5);
   const options = useMemo(() => swapOptionsForPurpose(day.purpose, library), [day.purpose, library]);
   const workout = library.find(w => w.id === day.workoutId);
   const canSwap = options.length > 1;
+
+  function submitOutdoor() {
+    if (!onLogOutdoor) return;
+    onLogOutdoor({
+      workoutId: day.workoutId, name: day.name, category: workout ? workout.category : 'Outdoor',
+      durationSeconds: Math.max(60, Math.round(outdoorMinutes * 60)), rpe: outdoorRpe,
+    });
+    setLoggingOutdoor(false);
+    setOutdoorLogged(true);
+  }
 
   return (
     <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: 12 }}>
@@ -177,6 +260,7 @@ function DayRow({ day, weekday, library, onOpen, onSwap }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
             <span style={{ fontFamily: FONT_BODY, fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>{PURPOSE_LABEL[day.purpose] || day.purpose}</span>
             {day.isWeightedDay && <span style={{ fontFamily: FONT_BODY, fontSize: 9.5, color: INK, background: 'var(--accent)', borderRadius: 5, padding: '1px 6px', fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase' }}>Big day</span>}
+            {outdoorLogged && <span style={{ fontFamily: FONT_BODY, fontSize: 9.5, color: TEXT, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 5, padding: '1px 6px', fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase' }}>Logged outdoors</span>}
           </div>
           <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: TEXT, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{day.name}</div>
           <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginTop: 2 }}>{fmtLong(day.plannedSeconds)} · ~{day.plannedTss} TSS</div>
@@ -186,12 +270,37 @@ function DayRow({ day, weekday, library, onOpen, onSwap }) {
             <Play size={15} fill={INK} color={INK} />
           </button>
         )}
+        {onLogOutdoor && (
+          <button onClick={() => { setLoggingOutdoor(s => !s); setSwapping(false); }} title="Log as done outdoors" style={{ background: loggingOutdoor ? 'var(--accent)' : PANEL2, border: `1px solid ${loggingOutdoor ? 'var(--accent)' : LINE}`, borderRadius: 8, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+            <Sun size={14} color={loggingOutdoor ? INK : SUB} />
+          </button>
+        )}
         {canSwap && (
-          <button onClick={() => setSwapping(s => !s)} title="Swap" style={{ background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+          <button onClick={() => { setSwapping(s => !s); setLoggingOutdoor(false); }} title="Swap" style={{ background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
             <RefreshCw size={14} color={SUB} />
           </button>
         )}
       </div>
+      {loggingOutdoor && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${LINE}` }}>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB, marginBottom: 8, lineHeight: 1.5 }}>Rode this outdoors instead? No power data to go on, so give a duration and how hard it felt — that's enough to estimate the load and count it toward this week.</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, width: 60, flexShrink: 0 }}>Duration</span>
+            <input type="number" min={5} max={600} value={outdoorMinutes}
+              onChange={e => setOutdoorMinutes(Math.max(5, Math.min(600, Number(e.target.value) || 0)))}
+              style={{ fontFamily: FONT_NUM, width: 70, padding: '6px 8px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 13 }} />
+            <span style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB }}>min</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, width: 60, flexShrink: 0 }}>RPE</span>
+            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+              <button key={n} onClick={() => setOutdoorRpe(n)}
+                style={{ fontFamily: FONT_NUM, width: 26, height: 26, borderRadius: 6, border: `1px solid ${outdoorRpe === n ? 'var(--accent)' : LINE}`, background: outdoorRpe === n ? 'var(--accent)' : PANEL2, color: outdoorRpe === n ? INK : TEXT, fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>{n}</button>
+            ))}
+          </div>
+          <button onClick={submitOutdoor} style={{ fontFamily: FONT_BODY, width: '100%', padding: '9px 0', borderRadius: 8, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Log outdoor ride</button>
+        </div>
+      )}
       {swapping && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${LINE}` }}>
           <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB, marginBottom: 6 }}>Swap for another {(PURPOSE_LABEL[day.purpose] || day.purpose).toLowerCase()} session:</div>
@@ -217,7 +326,7 @@ function DayRow({ day, weekday, library, onOpen, onSwap }) {
 // ---------------------------------------------------------------------------
 // One week: header (phase, load, recovery badge) + the day rows. Collapsible.
 // ---------------------------------------------------------------------------
-function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardRef, onOpen, onSwap, onCheckin }) {
+function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardRef, onOpen, onSwap, onCheckin, onLogOutdoor }) {
   const [open, setOpen] = useState(defaultOpen);
   const cvd = useContext(ColorblindContext);
   const phaseInfo = PHASE[week.phase];
@@ -246,7 +355,7 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
               const dayIdx = weekdayPattern && weekdayPattern.length ? weekdayPattern[i % weekdayPattern.length] : null;
               const weekday = dayIdx != null ? { index: dayIdx, label: WEEKDAY_LABELS[dayIdx] } : null;
               return (
-                <DayRow key={i} day={d} weekday={weekday} library={library} onOpen={onOpen} onSwap={(newId) => onSwap(week.weekNumber, i, newId)} />
+                <DayRow key={i} day={d} weekday={weekday} library={library} onOpen={onOpen} onSwap={(newId) => onSwap(week.weekNumber, i, newId)} onLogOutdoor={onLogOutdoor} />
               );
             })}
           </div>
@@ -269,7 +378,7 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
 // ---------------------------------------------------------------------------
 // The main view. Holds the active plan; delegates onboarding to PlannerSetup.
 // ---------------------------------------------------------------------------
-export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSavePlan, onOpenPlanWorkout, archivedPlans = [], onArchivePlan, onDeleteArchivedPlan }) {
+export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSavePlan, onOpenPlanWorkout, archivedPlans = [], onArchivePlan, onDeleteArchivedPlan, onLogOutdoor }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dayEditor, setDayEditor] = useState(false);
   const [weekdayEditor, setWeekdayEditor] = useState(false);
@@ -296,10 +405,11 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan && plan.createdAt, currentWeek]);
 
-  function handleGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex }) {
+  function handleGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex, trainingAge, riderAgeBand, continuesAfter, continuationHint }) {
     const p = generatePlan({
       goalKey, totalWeeks: weeks, daysPerWeek: days, weeklyHours: hours,
       currentFtp: ftp, recentWeeklyTss, multiSport, library, weightedDayIndex,
+      trainingAge, riderAgeBand, continuesAfter, continuationHint,
     });
     onSavePlan(p);
   }
@@ -325,7 +435,7 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
   if (!plan) {
     return (
       <div>
-        <PlannerSetup ftp={ftp} recentWeeklyTss={recentWeeklyTss} onGenerate={handleGenerate} />
+        <PlannerSetup ftp={ftp} recentWeeklyTss={recentWeeklyTss} archivedPlans={archivedPlans} onGenerate={handleGenerate} />
         <ArchiveList plans={archivedPlans} onDelete={onDeleteArchivedPlan} />
       </div>
     );
@@ -465,7 +575,7 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
             defaultOpen={w.weekNumber === currentWeek}
             isCurrent={w.weekNumber === currentWeek}
             cardRef={w.weekNumber === currentWeek ? currentWeekRef : null}
-            onOpen={onOpenPlanWorkout} onSwap={handleSwap} onCheckin={handleCheckin} />
+            onOpen={onOpenPlanWorkout} onSwap={handleSwap} onCheckin={handleCheckin} onLogOutdoor={onLogOutdoor} />
         ))}
       </div>
 
