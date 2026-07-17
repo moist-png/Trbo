@@ -534,15 +534,20 @@ function smartScaleWorkout(originalIntervals, targetSeconds, repeatWholeCore) {
       }
     }
     // 1b) opt-in only: add whole extra laps of the core pattern, but only
-    //     when a full lap's worth of time is available, so it can't overshoot
+    //     when there's room for a full lap AND a real recovery gap ahead of
+    //     it — stacking another max-effort pass straight onto the last one
+    //     with no rest in between isn't sound training, so each extra pass
+    //     costs its own ~12min easy-riding buffer before it starts.
     let addedModules = [];
     if (repeatWholeCore && groups.length === 0) {
       const module = findCoreModule(originalIntervals, classes);
       if (module && module.duration > 0) {
         const maxAdd = 4;
-        while (diff >= module.duration && addedModules.length < maxAdd) {
-          addedModules.push(module.build());
-          diff -= module.duration;
+        const gapSeconds = 12 * 60;
+        const perPass = module.duration + gapSeconds;
+        while (diff >= perPass && addedModules.length < maxAdd) {
+          addedModules.push([iv('Endurance', gapSeconds, 'power', 65), ...module.build()]);
+          diff -= perPass;
         }
       }
     }
