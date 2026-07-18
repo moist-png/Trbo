@@ -4,7 +4,7 @@ import {
   Search, Library, Wrench, Gauge, Save, Edit3, Copy, Settings as SettingsIcon, Bluetooth,
   BluetoothOff, Volume2, Sun, Moon, RefreshCw, Check, Zap, ChevronDown as ChevDown, Bike, Dumbbell, Home,
   Trophy, HeartPulse, Upload, Flame, Link as LinkIcon, CalendarDays, BarChart3, Locate, Download,
-  Target, Flag, TrendingUp, Gamepad2, Mountain, Smartphone, LogOut, Star, ListOrdered, MessageSquare, GripVertical,
+  Target, Flag, TrendingUp, Gamepad2, Mountain, Smartphone, LogOut, Star, ListOrdered, MessageSquare, GripVertical, Skull,
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import PlannerView from './PlannerView';
@@ -2325,6 +2325,138 @@ const LIBRARY = [
       iv('Cool down', 600, 'power', 50),
     ],
   },
+
+  // ---------- "pain" workouts ----------
+  // Deliberately, wildly over-tough sessions -- built to be close to
+  // impossible on a pure FTP-percentage basis. They're marked `pain: true`
+  // so the Library can badge/filter them, but they carry NO entry in
+  // WORKOUT_PURPOSE (planner.js) -- that's what keeps them out of the
+  // training plan generator. This is intentional, not an oversight: do not
+  // "fix" these by adding a purpose tag. If a workout belongs in this
+  // section, leave WORKOUT_PURPOSE alone for its id.
+  {
+    id: 'ride-hack-saw', name: 'Hack saw', category: 'Rides', pain: true,
+    description: 'Sixty rounds of sweet spot to sprint, never resting deep enough to matter.',
+    intervals: [
+      iv('Warm up', 300, 'power', 55),
+      ...repeatIv(12, () => [
+        iv('Sweet spot', 60, 'power', 90),
+        iv('Threshold', 60, 'power', 120),
+        iv('VO2 max', 60, 'power', 140),
+        iv('Sprint', 60, 'power', 160),
+        iv('Recovery', 60, 'power', 55),
+      ]),
+    ],
+  },
+  {
+    id: 'ride-darth-maul', name: 'Darth Maul', category: 'Rides', pain: true,
+    description: 'Pain.',
+    intervals: [
+      iv('Warm up', 900, 'power', 55),
+      iv('Sprint', 30, 'power', 150),
+      iv('VO2 max', 60, 'power', 130),
+      iv('VO2 max', 60, 'power', 120),
+      iv('Threshold', 120, 'power', 110),
+      iv('Threshold', 120, 'power', 100),
+      iv('Sweet spot', 180, 'power', 90),
+      iv('Sweet spot', 180, 'power', 80),
+      iv('Recovery', 300, 'power', 55),
+      iv('Sprint', 30, 'power', 150),
+      iv('VO2 max', 60, 'power', 130),
+      iv('VO2 max', 60, 'power', 120),
+      iv('Threshold', 120, 'power', 110),
+      iv('Threshold', 120, 'power', 100),
+      iv('Sweet spot', 180, 'power', 90),
+      iv('Sweet spot', 180, 'power', 80),
+      iv('Recovery', 300, 'power', 55),
+      iv('Sweet spot', 300, 'power', 90),
+      iv('Threshold', 300, 'power', 100),
+      iv('Threshold', 180, 'power', 110),
+      iv('VO2 max', 120, 'power', 120),
+      iv('VO2 max', 20, 'power', 140),
+      iv('VO2 max', 30, 'power', 170),
+      iv('VO2 max', 20, 'power', 140),
+      iv('VO2 max', 120, 'power', 120),
+      iv('Threshold', 180, 'power', 110),
+      iv('Sweet spot', 300, 'power', 100),
+      iv('Sweet spot', 300, 'power', 90),
+      iv('Recovery', 300, 'power', 55),
+      iv('Sweet spot', 180, 'power', 80),
+      iv('Sweet spot', 180, 'power', 90),
+      iv('Threshold', 120, 'power', 100),
+      iv('Threshold', 120, 'power', 110),
+      iv('VO2 max', 60, 'power', 120),
+      iv('VO2 max', 60, 'power', 130),
+      iv('Sprint', 30, 'power', 150),
+      iv('Recovery', 300, 'power', 55),
+      iv('Sweet spot', 180, 'power', 80),
+      iv('Sweet spot', 180, 'power', 90),
+      iv('Threshold', 120, 'power', 100),
+      iv('Threshold', 120, 'power', 110),
+      iv('VO2 max', 60, 'power', 120),
+      iv('VO2 max', 60, 'power', 130),
+      iv('Sprint', 30, 'power', 150),
+      iv('Cool down', 900, 'power', 55),
+    ],
+  },
+  {
+    id: 'ride-quad-homicide', name: 'Quad homicide', category: 'Rides', pain: true,
+    description: 'Ninety minutes of sprints and VO2 hits, back to back to back.',
+    intervals: [
+      iv('Warm up', 300, 'power', 55),
+      iv('Threshold', 180, 'power', 100),
+      iv('Sweet spot', 300, 'power', 90),
+      iv('Sprint', 30, 'power', 200),
+      iv('VO2 max', 120, 'power', 120),
+      iv('Sprint', 30, 'power', 130),
+      iv('VO2 max', 120, 'power', 110),
+      iv('Sprint', 30, 'power', 130),
+      iv('VO2 max', 120, 'power', 120),
+      iv('Sprint', 30, 'power', 200),
+      iv('Warm up', 300, 'power', 55),
+      iv('Threshold', 180, 'power', 100),
+      iv('Sweet spot', 300, 'power', 90),
+      iv('Sprint', 30, 'power', 130),
+      iv('VO2 max', 120, 'power', 110),
+      iv('Sprint', 30, 'power', 200),
+      iv('VO2 max', 120, 'power', 120),
+      iv('Sprint', 30, 'power', 200),
+      iv('VO2 max', 120, 'power', 110),
+      iv('Sprint', 30, 'power', 130),
+      iv('Warm up', 300, 'power', 55),
+      iv('Sprint', 30, 'power', 130),
+      iv('VO2 max', 120, 'power', 110),
+      iv('Sprint', 30, 'power', 200),
+      iv('VO2 max', 120, 'power', 120),
+      iv('Sprint', 30, 'power', 200),
+      iv('VO2 max', 120, 'power', 110),
+      iv('Sprint', 30, 'power', 130),
+      iv('Sweet spot', 300, 'power', 90),
+      iv('Threshold', 180, 'power', 100),
+      iv('Warm up', 300, 'power', 55),
+      iv('Sprint', 30, 'power', 200),
+      iv('VO2 max', 120, 'power', 120),
+      iv('Sprint', 30, 'power', 130),
+      iv('VO2 max', 120, 'power', 110),
+      iv('Sprint', 30, 'power', 130),
+      iv('VO2 max', 120, 'power', 120),
+      iv('Sprint', 30, 'power', 200),
+      iv('Sweet spot', 300, 'power', 90),
+      iv('Threshold', 180, 'power', 100),
+      iv('Cool down', 300, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-no-thanks', name: 'No thanks', category: 'Rides', pain: true,
+    description: 'Unless??',
+    intervals: [
+      iv('Warm up', 300, 'power', 55),
+      ...repeatIv(15, i => (i < 14
+        ? [iv('VO2 max', 120, 'power', 130), iv('Threshold', 60, 'power', 100)]
+        : [iv('VO2 max', 120, 'power', 130)])),
+      iv('Cool down', 300, 'power', 50),
+    ],
+  },
 ];
 const CATEGORIES = ['All', 'Rides', 'Basics', 'Recovery', 'Endurance', 'Tempo', 'Sweet Spot', 'Threshold', 'VO2 Max', 'FTP Test'];
 
@@ -3137,7 +3269,10 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', boxSizing: 'border-box' }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: BG, width: '100%', maxWidth: 520, borderRadius: 18, border: `1px solid ${LINE}`, padding: 20, maxHeight: 'min(85vh, calc(100dvh - 48px))', overflowY: 'auto', overflowX: 'hidden', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{workout.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            {workout.pain && <Skull size={18} color={RED} style={{ flexShrink: 0 }} />}
+            <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{workout.name}</div>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
             <button onClick={() => onToggleStar(workout.id)} title={starred ? 'Unstar' : 'Star'} style={{ background: 'none', border: 'none', color: SUB, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, padding: 0 }}>
               <Star size={20} color={starred ? 'var(--accent)' : SUB} fill={starred ? 'var(--accent)' : 'none'} />
@@ -3149,6 +3284,7 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
         </div>
         <div style={{ fontSize: 13, color: SUB, marginBottom: 14 }}>{workout.description}</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, fontSize: 12, color: SUB, flexWrap: 'wrap' }}>
+          {workout.pain && <span style={{ border: `1px solid ${RED}`, borderRadius: 6, padding: '3px 8px', color: RED, fontWeight: 600 }}>Pain</span>}
           <span style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '3px 8px' }}>{workout.category}</span>
           <span style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '3px 8px' }}>{fmtLong(actualTotal)}</span>
           <span style={{ border: `1px solid ${LINE}`, borderRadius: 6, padding: '3px 8px' }}>{scaledIntervals.length} intervals</span>
@@ -3767,6 +3903,7 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
     const list = withFlag.filter(w => {
       if (activeCat === 'All') return true;
       if (activeCat === 'Custom') return w.custom;
+      if (activeCat === 'Pain') return !!w.pain;
       if (purpose) {
         // Built-ins: match their real tagged purpose. Custom workouts have
         // no entry in WORKOUT_PURPOSE (it's keyed by fixed library ids), so
@@ -3800,7 +3937,7 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
       </div>
       {!lockedCategory && (
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
-          {CATEGORIES.concat('Custom').map(c => <Chip key={c} active={cat === c} onClick={() => setCat(cat === c ? 'All' : c)}>{c}</Chip>)}
+          {CATEGORIES.concat('Custom', 'Pain').map(c => <Chip key={c} active={cat === c} onClick={() => setCat(cat === c ? 'All' : c)}>{c}</Chip>)}
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
@@ -3814,6 +3951,7 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
           return (
             <div key={w.id} onClick={() => onOpen(w)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
+                {w.pain && <Skull size={15} color={RED} style={{ flexShrink: 0 }} />}
                 <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 700, fontSize: 17, color: TEXT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
                 <button onClick={e => { e.stopPropagation(); onToggleStar(w.id); }} title={starred ? 'Unstar' : 'Star'}
                   style={{ background: 'none', border: 'none', padding: 2, margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
