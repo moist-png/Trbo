@@ -100,12 +100,13 @@ workflows:
         script: npx cap sync android
       - name: Set Android SDK location
         script: echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
-      - name: Bump version code
+      - name: Bump version code and name
         script: |
           cd android
           LATEST=$(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks internal || echo "")
           if [ -z "$LATEST" ]; then NEW_CODE=$BUILD_NUMBER; else NEW_CODE=$((LATEST + 1)); fi
           sed -i "s/versionCode 1/versionCode $NEW_CODE/" app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"1.0.$NEW_CODE\"/" app/build.gradle
       - name: Build signed .aab
         script: |
           cd android
