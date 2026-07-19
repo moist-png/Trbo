@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useContext } from 'react';
-import { CalendarDays, ChevronRight, ChevronDown, ChevronUp, Play, RefreshCw, Trash2, Target, Flag, TrendingUp, Check, X, Sun } from 'lucide-react';
+import { CalendarDays, ChevronRight, ChevronDown, ChevronUp, Play, RefreshCw, Trash2, Target, Flag, TrendingUp, Check, X, Sun, Info } from 'lucide-react';
 import {
   GOALS, PHASE, PURPOSE_LABEL, WORKOUT_PURPOSE,
   generatePlan, validatePlan, swapOptionsForPurpose, swapDayWorkout, applyCheckin,
@@ -28,6 +28,28 @@ function fmtLong(sec) {
   return `${m} min`;
 }
 
+// A small "i" icon that shows a short explanation on tap. Tap-to-toggle
+// rather than hover, since most of this app is used on a touchscreen.
+function InfoDot({ text }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle' }}>
+      <button type="button" onClick={e => { e.stopPropagation(); setOpen(o => !o); }} onBlur={() => setOpen(false)}
+        aria-label="More info" style={{ background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', display: 'flex', color: SUB }}>
+        <Info size={14} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: 0, marginBottom: 6, width: 230, zIndex: 50,
+          background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, padding: 10,
+          fontFamily: FONT_BODY, fontSize: 11.5, fontWeight: 500, textTransform: 'none', letterSpacing: 'normal',
+          color: TEXT, lineHeight: 1.45, boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+        }}>{text}</div>
+      )}
+    </span>
+  );
+}
+
 // Training age and actual age only ever shape plan generation on this
 // device — they're never sent to Supabase. Same treatment as Mini Games'
 // personal bests: local to the device, gone on reinstall, never synced.
@@ -51,6 +73,10 @@ const PHASE_COLOR = {
 };
 const PHASE_COLOR_CVD = {
   base: '#56B4E9', build: '#E69F00', peak: '#D55E00', taper: '#0072B2',
+};
+
+const CHECKIN_LABELS = {
+  'too-easy': 'too easy', 'about-right': 'about right', 'too-hard': 'too hard', 'missed-a-lot': 'missed a lot',
 };
 
 // ---------------------------------------------------------------------------
@@ -130,7 +156,10 @@ function PlannerSetup({ ftp, recentWeeklyTss, archivedPlans, onGenerate }) {
 
       {/* Training age: a skill-level bucket, not a number of years — shapes
           how conservatively the weekly load ramps. Kept on this device only. */}
-      <div style={sectionLabel}>How long have you been training with structure?</div>
+      <div style={{ ...sectionLabel, display: 'flex', alignItems: 'center', gap: 6 }}>
+        How long have you been training with structure?
+        <InfoDot text="This is about structured training in general, not cycling specifically. New to cycling but years of structured running, rowing, or similar? Pick 1–3 years — your engine is trained, but give your body time to adapt to bike-specific stress." />
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 22 }}>
         {[
           { key: 'new', label: 'New to it' },
@@ -330,6 +359,7 @@ function DayRow({ day, weekday, library, onOpen, onSwap, onLogOutdoor }) {
 // ---------------------------------------------------------------------------
 function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardRef, onOpen, onSwap, onCheckin, onLogOutdoor }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [pendingMissedReason, setPendingMissedReason] = useState(false);
   const cvd = useContext(ColorblindContext);
   const phaseInfo = PHASE[week.phase];
   const phaseColor = (cvd ? PHASE_COLOR_CVD : PHASE_COLOR)[week.phase] || SUB;
@@ -361,15 +391,36 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
               );
             })}
           </div>
-          {/* Weekly check-in */}
+          {/* Weekly check-in — locked once answered so a week's feedback (and
+              the plan adjustment it already triggered) can't be silently
+              changed after the fact. */}
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
-            <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB, marginBottom: 8 }}>Finished this week? Tell the plan how it felt and it'll tune the weeks ahead:</div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {[['too-easy', 'Too easy'], ['about-right', 'About right'], ['too-hard', 'Too hard'], ['missed-a-lot', 'Missed a lot']].map(([key, label]) => (
-                <button key={key} onClick={() => onCheckin(week.weekNumber, key)}
-                  style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '6px 11px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, cursor: 'pointer' }}>{label}</button>
-              ))}
-            </div>
+            {week.checkin ? (
+              <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: SUB, lineHeight: 1.5 }}>
+                You said this week was <span style={{ color: TEXT, fontWeight: 700 }}>{CHECKIN_LABELS[week.checkin] || week.checkin}</span>
+                {week.checkinReason && (week.checkinReason === 'fatigue' ? ' — mostly fatigue.' : ' — mostly schedule.')}
+              </div>
+            ) : pendingMissedReason ? (
+              <>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB, marginBottom: 8 }}>Was that mostly fatigue, or your schedule?</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button onClick={() => { onCheckin(week.weekNumber, 'missed-a-lot', 'fatigue'); setPendingMissedReason(false); }}
+                    style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '6px 11px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, cursor: 'pointer' }}>Fatigue</button>
+                  <button onClick={() => { onCheckin(week.weekNumber, 'missed-a-lot', 'schedule'); setPendingMissedReason(false); }}
+                    style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '6px 11px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, cursor: 'pointer' }}>Schedule</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB, marginBottom: 8 }}>Finished this week? Tell the plan how it felt and it'll tune the weeks ahead:</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[['too-easy', 'Too easy'], ['about-right', 'About right'], ['too-hard', 'Too hard'], ['missed-a-lot', 'Missed a lot']].map(([key, label]) => (
+                    <button key={key} onClick={() => (key === 'missed-a-lot' ? setPendingMissedReason(true) : onCheckin(week.weekNumber, key))}
+                      style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '6px 11px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, cursor: 'pointer' }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -425,8 +476,8 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
     pattern[sessionIndex] = dayIdx;
     onSavePlan(setWeekdayPattern(plan, pattern));
   }
-  function handleCheckin(weekNumber, feedback) {
-    onSavePlan(applyCheckin(plan, weekNumber, feedback, library));
+  function handleCheckin(weekNumber, feedback, reason) {
+    onSavePlan(applyCheckin(plan, weekNumber, feedback, library, reason));
   }
   // Change training days from the current week onward. Past weeks are frozen.
   function handleChangeDays(newDays) {

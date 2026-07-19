@@ -145,7 +145,6 @@ export const WORKOUT_PURPOSE = {
   'ride-orchard-backroads': 'tempo',
   'ride-reservoir-ring': 'tempo',
   'ride-delta-causeway': 'tempo',
-  'ride-backroad-sweetspot': 'sweetspot',
   'ride-quarry-climb-ladder': 'sweetspot',
   'ride-meadowline-rollers': 'sweetspot',
   'ride-timber-road-sweetspot': 'sweetspot',
@@ -166,7 +165,6 @@ export const WORKOUT_PURPOSE = {
   'ride-the-long-escape': 'vo2max',
   'ride-garden-path-spin': 'recovery',
   'ride-quiet-streets-loop': 'recovery',
-  'ride-pastureland-loop': 'endurance',
   'ride-watermill-loop': 'endurance',
 };
 
@@ -321,7 +319,6 @@ export const WORKOUT_TERRAIN = {
   'ride-orchard-backroads': ['rolling', 'scenic'],
   'ride-reservoir-ring': ['rolling'],
   'ride-delta-causeway': ['flat', 'windy', 'punchy'],
-  'ride-backroad-sweetspot': ['rolling'],
   'ride-quarry-climb-ladder': ['sustained-climb'],
   'ride-meadowline-rollers': ['rolling'],
   'ride-timber-road-sweetspot': ['sustained-climb', 'windy'],
@@ -342,7 +339,6 @@ export const WORKOUT_TERRAIN = {
   'ride-the-long-escape': ['mixed', 'windy'],
   'ride-garden-path-spin': ['scenic', 'flat'],
   'ride-quiet-streets-loop': ['scenic', 'rolling'],
-  'ride-pastureland-loop': ['flat', 'scenic'],
   'ride-watermill-loop': ['flat', 'scenic'],
 };
 
@@ -618,12 +614,24 @@ export function weeklyLoadTargets({ startWeeklyTss, phaseByWeek, recoveryFlags, 
 // from over-committing the week's time budget before a single workout is
 // even picked. Without them the function still works, it just can't apply
 // the time-budget check.
-export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSport, riderAgeBand, library, weeklySecondsBudget }) {
+export function weekPurposeSlots({ phase, daysPerWeek, goal, isRecovery, multiSport, riderAgeBand, library, weeklySecondsBudget, targetTss }) {
   if (isRecovery) {
     // Deload: mostly recovery + easy endurance, at most one light quality day.
+    //
+    // Cap the session count to what this week's (much lower) TSS target can
+    // actually support at a worthwhile length. Without this, every flexible
+    // ride below just gets scaled down by the same factor and clamped to the
+    // 20-minute floor -- so a deep deload (e.g. stacked with a "missed a lot"
+    // check-in) turns into several near-useless token rides instead of one
+    // or two real ones. ~20 TSS is roughly a 35-40 minute ride at recovery
+    // pace, a reasonable line for "worth getting on the bike for."
+    const MIN_MEANINGFUL_RECOVERY_TSS = 28;
+    const n = targetTss != null
+      ? Math.min(daysPerWeek, Math.max(1, Math.floor(targetTss / MIN_MEANINGFUL_RECOVERY_TSS)))
+      : daysPerWeek;
     const slots = [];
-    for (let i = 0; i < daysPerWeek; i++) {
-      slots.push(i === 0 && daysPerWeek >= 3 ? 'endurance' : 'recovery');
+    for (let i = 0; i < n; i++) {
+      slots.push(i === 0 && n >= 3 ? 'endurance' : 'recovery');
     }
     return slots;
   }
@@ -808,7 +816,7 @@ export function maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, reco
 // `sessionSecondsHint` (the rough seconds a single session has) are all
 // optional; when omitted the function still works and falls back to prior
 // behaviour.
-export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTerrainThisWeek, phase, recentByPurpose, sessionSecondsHint) {
+export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTerrainThisWeek, phase, recentByPurpose, sessionSecondsHint, recoveryMode) {
   let candidates = library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
   if (!candidates.length) {
     // Fallback chain so a slot is never empty.
@@ -837,7 +845,15 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
   // average, because the flexible easy days shrink to make room. 1.5x the
   // average slot is the "comfortable" ceiling before a workout would have to be
   // compressed to fit. Only applied to purposes we keep at native length.
-  const durationAware = sessionSecondsHint && !FIXED_LENGTH_EXEMPT.has(purpose);
+  // Endurance/recovery/tempo are normally exempt here because they get
+  // rescaled to fit after picking, so native length doesn't matter for a
+  // normal week. That assumption breaks in a recovery week: everything
+  // flexible shares one scale factor, so one "epic" multi-hour native ride
+  // picked alongside short recovery spins soaks up the week's whole time
+  // budget while the others get scaled down to nothing. In recovery mode we
+  // apply the same duration-fit penalty to flexible purposes too, using a
+  // recovery-scaled hint, so a long native ride can't win a deload slot.
+  const durationAware = sessionSecondsHint && (recoveryMode || !FIXED_LENGTH_EXEMPT.has(purpose));
   const comfortableSeconds = durationAware ? sessionSecondsHint * 1.5 : 0;
   function score(w) {
     let s = 0;
@@ -1177,7 +1193,7 @@ export function generatePlan({
 
   const weeks = phaseByWeek.map((phase, wi) => {
     const isRecovery = recoveryFlags[wi];
-    let purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, riderAgeBand, library, weeklySecondsBudget });
+    let purposeSlots = weekPurposeSlots({ phase, daysPerWeek: effectiveDays, goal, isRecovery, multiSport, riderAgeBand, library, weeklySecondsBudget, targetTss: loadTargets[wi] });
     purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     // The weighted "big day" is always an endurance session -- the one
     // purpose type that's both length-flexible and safe to scale up without
@@ -1189,10 +1205,15 @@ export function generatePlan({
     const usedIds = new Set();
     const usedTerrain = new Set();
     const targetTss = loadTargets[wi];
+    // Recovery weeks get their own, much smaller session hint derived from
+    // this week's actual TSS target (~30 TSS/hour at recovery pace) rather
+    // than the plan-wide average, so the picker favours short native rides
+    // instead of a long "epic" one that would dominate the week once scaled.
+    const pickHint = isRecovery ? (targetTss / Math.max(1, purposeSlots.length)) * 120 : sessionSecondsHint;
 
     // First pass: pick a workout per slot at its native length.
     const rawDays = purposeSlots.map(purpose => {
-      const w = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, phase, recentByPurpose, sessionSecondsHint);
+      const w = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, phase, recentByPurpose, pickHint, isRecovery);
       usedIds.add(w.id);
       markTerrainUsed(usedTerrain, w.id);
       markRecentlyUsed(recentByPurpose, purpose, w.id);
@@ -1358,13 +1379,21 @@ export function validatePlan(plan) {
 // weeks), we shift the *baseline load* the rest of the plan ramps from and
 // recompute every future week's target. This keeps the ramp-rate and recovery
 // rules valid by construction. Returns a new plan.
-export function applyCheckin(plan, weekNumber, feedback, library) {
+export function applyCheckin(plan, weekNumber, feedback, library, reason) {
   // feedback: 'too-easy' | 'about-right' | 'too-hard' | 'missed-a-lot'
-  const factor = { 'too-easy': 1.08, 'about-right': 1.0, 'too-hard': 0.85, 'missed-a-lot': 0.7 }[feedback] || 1.0;
+  // reason (only meaningful for 'missed-a-lot'): 'fatigue' | 'schedule'.
+  // A schedule-driven miss isn't a sign the rider was overreaching, so it
+  // eases the baseline back gently (same factor as 'too-hard') rather than
+  // the sharper fatigue cut, and doesn't force the next week into a
+  // recovery week -- there's no accumulated fatigue to actually recover
+  // from, just missed training stimulus.
+  const missedScheduleOnly = feedback === 'missed-a-lot' && reason === 'schedule';
+  const factor = missedScheduleOnly ? 0.85
+    : { 'too-easy': 1.08, 'about-right': 1.0, 'too-hard': 0.85, 'missed-a-lot': 0.7 }[feedback] || 1.0;
 
   // Optionally convert the very next week into an unplanned recovery week.
   let recoveryFlags = plan.weeks.map(w => w.isRecovery);
-  if (feedback === 'too-hard' || feedback === 'missed-a-lot') {
+  if (feedback === 'too-hard' || (feedback === 'missed-a-lot' && !missedScheduleOnly)) {
     const idx = plan.weeks.findIndex(w => w.weekNumber === weekNumber + 1);
     if (idx >= 0 && plan.weeks[idx].phase !== 'taper') recoveryFlags[idx] = true;
   }
@@ -1398,7 +1427,8 @@ export function applyCheckin(plan, weekNumber, feedback, library) {
   });
 
   const weeks = plan.weeks.map((w, i) => {
-    if (w.weekNumber <= weekNumber) return { ...w, isRecovery: recoveryFlags[i] };
+    if (w.weekNumber === weekNumber) return { ...w, isRecovery: recoveryFlags[i], checkin: feedback, checkinReason: feedback === 'missed-a-lot' ? (reason || null) : null };
+    if (w.weekNumber < weekNumber) return { ...w, isRecovery: recoveryFlags[i] };
     return { ...w, targetTss: targets[i], isRecovery: recoveryFlags[i], insertedRecovery: recoveryFlags[i] && !plan.weeks[i].isRecovery };
   });
 
@@ -1428,7 +1458,7 @@ export function rebuildWeekWorkouts(plan, library, fromWeek) {
       (w.days || []).forEach(d => { if (d.purpose && d.workoutId) markRecentlyUsed(recentByPurpose, d.purpose, d.workoutId); });
       return w;
     }
-    let purposeSlots = weekPurposeSlots({ phase: w.phase, daysPerWeek: plan.daysPerWeek, goal, isRecovery: w.isRecovery, multiSport: plan.multiSport, library, weeklySecondsBudget });
+    let purposeSlots = weekPurposeSlots({ phase: w.phase, daysPerWeek: plan.daysPerWeek, goal, isRecovery: w.isRecovery, multiSport: plan.multiSport, library, weeklySecondsBudget, targetTss: w.targetTss });
     purposeSlots = maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, recoveryFlags, wi);
     if (plan.weightedDayIndex != null && plan.weightedDayIndex >= 0 && plan.weightedDayIndex < purposeSlots.length) {
       purposeSlots = purposeSlots.slice();
@@ -1436,8 +1466,11 @@ export function rebuildWeekWorkouts(plan, library, fromWeek) {
     }
     const usedIds = new Set();
     const usedTerrain = new Set();
+    // See generatePlan: recovery weeks pick against a hint derived from
+    // their own (much lower) TSS target, not the plan-wide average.
+    const pickHint = w.isRecovery ? (w.targetTss / Math.max(1, purposeSlots.length)) * 120 : sessionSecondsHint;
     const rawDays = purposeSlots.map(purpose => {
-      const wk = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, w.phase, recentByPurpose, sessionSecondsHint);
+      const wk = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, w.phase, recentByPurpose, pickHint, w.isRecovery);
       usedIds.add(wk.id);
       markTerrainUsed(usedTerrain, wk.id);
       markRecentlyUsed(recentByPurpose, purpose, wk.id);

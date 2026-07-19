@@ -4,7 +4,7 @@ import {
   Search, Library, Wrench, Gauge, Save, Edit3, Copy, Settings as SettingsIcon, Bluetooth,
   BluetoothOff, Volume2, Sun, Moon, RefreshCw, Check, Zap, ChevronDown as ChevDown, Bike, Dumbbell, Home,
   Trophy, HeartPulse, Upload, Flame, Link as LinkIcon, CalendarDays, BarChart3, Locate, Download,
-  Target, Flag, TrendingUp, Gamepad2, Mountain, Smartphone, LogOut, Star, ListOrdered, MessageSquare, GripVertical, Skull,
+  Target, Flag, TrendingUp, Gamepad2, Mountain, Smartphone, LogOut, Star, ListOrdered, MessageSquare, GripVertical, Skull, Info,
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import PlannerView from './PlannerView';
@@ -172,10 +172,12 @@ const ZONE_COLORS = {
   standard: {
     Recovery: '#4A6FA5', Endurance: '#4FB8A6', Tempo: '#8FC93A',
     Threshold: '#C9F031', 'VO2 Max': '#FF9F40', Anaerobic: '#FF4D4D', Free: '#4B5563',
+    'Sweet Spot': '#B8D93A', 'FTP Test': '#2FC5AE',
   },
   colorblind: {
     Recovery: '#0072B2', Endurance: '#56B4E9', Tempo: '#009E73',
     Threshold: '#E69F00', 'VO2 Max': '#D55E00', Anaerobic: '#CC79A7', Free: '#4B5563',
+    'Sweet Spot': '#F0E442', 'FTP Test': '#2FC5AE',
   },
 };
 function zoneFor(interval, cvd) {
@@ -734,7 +736,7 @@ const LIBRARY = [
   {
     id: 'endurance-hour', name: 'Steady endurance hour', category: 'Basics',
     description: 'Long steady aerobic ride to build your base.',
-    intervals: [iv('Warm up', 300, 'power', 55), iv('Endurance', 2400, 'power', 68), iv('Cool down', 300, 'power', 50)],
+    intervals: [iv('Warm up', 300, 'power', 55), iv('Endurance', 3000, 'power', 68), iv('Cool down', 300, 'power', 50)],
   },
   {
     id: 'rolling-endurance', name: 'Rolling endurance', category: 'Basics',
@@ -2123,17 +2125,6 @@ const LIBRARY = [
     ],
   },
   {
-    id: 'ride-backroad-sweetspot', name: 'Backroad Sweet Spot', category: 'Rides',
-    description: 'A straightforward pair of sweet spot blocks on quiet backroads — no story, just the work.',
-    intervals: [
-      iv('Warm up', 720, 'power', 60),
-      iv('Sweet spot block 1', 1200, 'power', 90),
-      iv('Recover', 360, 'power', 55),
-      iv('Sweet spot block 2', 1200, 'power', 92),
-      iv('Cool down', 900, 'power', 50),
-    ],
-  },
-  {
     id: 'ride-quarry-climb-ladder', name: 'Quarry Climb Ladder', category: 'Rides',
     description: 'A long steady drag up an old quarry road, tackled in ever-longer sweet spot rungs.',
     intervals: [
@@ -2210,7 +2201,7 @@ const LIBRARY = [
     description: 'Paired efforts that mimic real racing — close the gap, then find one more gear to win the sprint.',
     intervals: [
       iv('Warm up', 900, 'power', 60),
-      ...repeatIv(10, () => [iv('Close the gap', 30, 'power', 115), iv('Recover', 10, 'power', 50), iv('Win the sprint', 10, 'power', 170), iv('Easy', 240, 'power', 55)]),
+      ...repeatIv(10, () => [iv('Close the gap', 30, 'power', 115), iv('Recover', 10, 'power', 50), iv('Win the sprint', 12, 'power', 170), iv('Easy', 240, 'power', 55)]),
       iv('Cool down', 900, 'power', 50),
     ],
   },
@@ -2305,15 +2296,6 @@ const LIBRARY = [
     description: 'Empty neighborhood streets before the day gets going — gently rolling but never pushed.',
     intervals: [
       ...repeatIv(6, () => [iv('Quiet streets', 780, 'power', 54), iv('Gentle rise', 120, 'power', 62)]),
-    ],
-  },
-  {
-    id: 'ride-pastureland-loop', name: 'Pastureland Loop', category: 'Rides',
-    description: 'An easy loop through open pasture country, steady Zone 2 the whole way.',
-    intervals: [
-      iv('Warm up', 480, 'power', 58),
-      iv('Endurance', 3000, 'power', 68),
-      iv('Cool down', 420, 'power', 50),
     ],
   },
   {
@@ -2491,6 +2473,31 @@ const PURPOSE_CHIP_ALIASES = {
   'climbing': 'threshold',
   'race': 'vo2max',
 };
+
+// Maps a purpose key (planner.js's WORKOUT_PURPOSE values, after aliasing)
+// to the display label used both by the filter chips above and by the small
+// per-card type chip in the library list.
+const PURPOSE_TO_LABEL = {
+  recovery: 'Recovery', endurance: 'Endurance', tempo: 'Tempo',
+  sweetspot: 'Sweet Spot', threshold: 'Threshold', vo2max: 'VO2 Max', test: 'FTP Test',
+};
+
+// The small type chip shown on each library card. Pain rides always show
+// just "Pain" — they intentionally carry no WORKOUT_PURPOSE tag (see the
+// "pain" workouts section below), and even for the few that do get scored
+// against a zone, their long recovery segments between spikes would drag a
+// naive average down to something misleading like "Endurance". A workout
+// designed to be nearly impossible should never read as an easy day.
+function workoutTypeChip(w, cvd) {
+  const palette = cvd ? ZONE_COLORS.colorblind : ZONE_COLORS.standard;
+  if (w.pain) return { label: 'Pain', color: RED };
+  const purpose = WORKOUT_PURPOSE[w.id];
+  if (!purpose) return null;
+  const resolved = PURPOSE_CHIP_ALIASES[purpose] || purpose;
+  const label = PURPOSE_TO_LABEL[resolved];
+  if (!label) return null;
+  return { label, color: palette[label] || SUB };
+}
 
 // ---------- audio ----------
 function useBeeper() {
@@ -3092,6 +3099,27 @@ function Confetti({ pieces }) {
 }
 
 // ---------- small ui atoms ----------
+// A small "i" icon that shows a short explanation on tap. Tap-to-toggle
+// rather than hover, since most of this app is used on a touchscreen.
+function InfoDot({ text }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle' }}>
+      <button type="button" onClick={e => { e.stopPropagation(); setOpen(o => !o); }} onBlur={() => setOpen(false)}
+        aria-label="More info" style={{ background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', display: 'flex', color: SUB, flexShrink: 0 }}>
+        <Info size={14} />
+      </button>
+      {open && (
+        <div onClick={e => e.stopPropagation()} style={{
+          position: 'absolute', bottom: '100%', left: 0, marginBottom: 6, width: 230, zIndex: 50,
+          background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, padding: 10,
+          fontFamily: "'Manrope', sans-serif", fontSize: 11.5, fontWeight: 500, textTransform: 'none', letterSpacing: 'normal',
+          color: TEXT, lineHeight: 1.45, boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+        }}>{text}</div>
+      )}
+    </span>
+  );
+}
 function Chip({ active, children, onClick }) {
   return (
     <button onClick={onClick} style={{
@@ -3127,7 +3155,7 @@ function ControlSkipBtn({ onClick, disabled, children }) {
 function ControlPlayBtn({ onClick, children }) {
   return (
     <button onClick={onClick} style={{
-      width: 58, height: 58, borderRadius: '50%', border: '2px solid var(--accent)', background: 'transparent',
+      width: 72, height: 72, borderRadius: '50%', border: '2px solid var(--accent)', background: 'transparent',
       color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'pointer', flexShrink: 0,
     }}>{children}</button>
@@ -3271,6 +3299,7 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             {workout.pain && <Skull size={18} color={RED} style={{ flexShrink: 0 }} />}
+            {workout.pain && <InfoDot text="These rides are designed to be nearly impossible at your true FTP. You can always dial down the FTP for a taste test." />}
             <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{workout.name}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
@@ -3343,10 +3372,19 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
           {scaledIntervals.map((it) => {
             const z = zoneFor(it, settings.colorblindMode);
+            // Sprints of 10s or less get a hidden 2s ramp baked into their
+            // actual duration (letting the trainer's flywheel spin up before
+            // the sprint really bites), so the label's advertised length and
+            // the timer's actual length differ slightly — flag it so that
+            // isn't confusing.
+            const isPaddedSprint = it.type === 'power' && it.target >= 140 && it.duration <= 12 && /sprint/i.test(it.label);
             return (
               <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '6px 8px', background: PANEL, borderRadius: 6 }}>
                 <div style={{ width: 4, height: 24, background: z.color, borderRadius: 2, flexShrink: 0 }} />
-                <div style={{ flex: 1, color: TEXT }}>{it.label}</div>
+                <div style={{ flex: 1, color: TEXT, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+                  {isPaddedSprint && <InfoDot text="Includes a hidden 2-second ramp so your trainer's flywheel can spin up to full resistance — you'll get the full sprint effort for the length shown." />}
+                </div>
                 <div style={{ color: SUB }}>{formatTarget(it, ftp, settings.targetDisplay)}</div>
                 <div style={{ color: SUB, width: 44, textAlign: 'right' }}>{fmt(it.duration)}</div>
               </div>
@@ -3888,6 +3926,7 @@ const LIBRARY_SORTS = [
 function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, category, onCategoryChange, starredIds, onToggleStar }) {
   const [query, setQuery] = useState('');
   const [localCat, setLocalCat] = useState(lockedCategory || 'All');
+  const cvd = useContext(ColorblindContext);
   // Category can be driven externally (the sidebar's category list on wide
   // viewports) or kept local (the chip row shown on portrait phone) — both
   // read/write the same value so the two stay in sync.
@@ -3937,7 +3976,7 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
       </div>
       {!lockedCategory && (
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
-          {CATEGORIES.concat('Custom', 'Pain').map(c => <Chip key={c} active={cat === c} onClick={() => setCat(cat === c ? 'All' : c)}>{c}</Chip>)}
+          {CATEGORIES.filter(c => c !== 'Rides' && c !== 'Basics').concat('Custom', 'Pain').map(c => <Chip key={c} active={cat === c} onClick={() => setCat(cat === c ? 'All' : c)}>{c}</Chip>)}
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
@@ -3948,6 +3987,7 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
         {all.map(w => {
           const total = totalDuration(w.intervals);
           const starred = starredIds.has(w.id);
+          const typeChip = workoutTypeChip(w, cvd);
           return (
             <div key={w.id} onClick={() => onOpen(w)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
@@ -3959,6 +3999,9 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
                 </button>
                 <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 12, color: 'var(--accent)', flexShrink: 0 }}>{fmtLong(total)}</div>
               </div>
+              {typeChip && (
+                <div style={{ display: 'inline-block', fontFamily: "'Manrope', sans-serif", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase', color: typeChip.color, border: `1px solid ${typeChip.color}`, borderRadius: 5, padding: '2px 7px', marginBottom: 8 }}>{typeChip.label}</div>
+              )}
               <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, color: SUB, marginBottom: 10 }}>{w.description}</div>
               <ProfileChart intervals={w.intervals} height={cardBarHeight} />
             </div>
@@ -5038,7 +5081,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   const isRampTest = !!workout.autoStopTest;
   const [currentIndex, setCurrentIndex] = useState(() => (resume && resume.index < intervals.length ? resume.index : 0));
   const [timeLeft, setTimeLeft] = useState(() => (resume && resume.index < intervals.length ? resume.timeLeft : intervals[0].duration));
-  const [isPlaying, setIsPlaying] = useState(false); // always resumes paused — the rider taps play when ready, rather than the trainer surprising them
+  const [isPlaying, setIsPlaying] = useState(() => !resume); // fresh start begins playing immediately (Start workout was already the "I'm ready" tap) — a resumed/backgrounded session still comes back paused so the trainer doesn't surprise the rider with resistance
   const [isDone, setIsDone] = useState(false);
   const [testResult, setTestResult] = useState(null); // { ftp, auto } once a ramp test ends
   const [ftpApplied, setFtpApplied] = useState(false);
@@ -5057,7 +5100,7 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
   // — kept only for building a .tcx/.fit export right after finishing, not
   // persisted anywhere.
   const sessionSeriesRef = useRef([]);
-  const sessionStartRef = useRef(null);
+  const sessionStartRef = useRef(resume ? null : new Date());
   const lastStepAvgRef = useRef(null); // average watts of the last fully-completed ramp step
   const underPowerStreakRef = useRef(0); // consecutive seconds under the fail threshold
   const triggerAutoStopRef = useRef(() => {});
@@ -5699,10 +5742,10 @@ function PlayerView({ workout, ftp, settings, trainer, heartRate, onExit, onSave
         </div>
 
         <div className="player-controls">
-          <div className="player-controls-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 8 }}>
+          <div className="player-controls-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 8 }}>
             <ControlSkipBtn onClick={() => skip(-1)} disabled={currentIndex === 0}><SkipBack size={18} /></ControlSkipBtn>
             <ControlPlayBtn onClick={isDone ? () => requestAction('restart') : togglePlay}>
-              {isDone ? <RotateCcw size={24} /> : isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 3 }} />}
+              {isDone ? <RotateCcw size={28} /> : isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" style={{ marginLeft: 3 }} />}
             </ControlPlayBtn>
             <ControlSkipBtn onClick={() => skip(1)} disabled={currentIndex === intervals.length - 1}><SkipForward size={18} /></ControlSkipBtn>
           </div>

@@ -695,7 +695,7 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit, cvd }) {
   // ---------- intro ----------
   if (phase === 'intro') {
     return (
-      <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 20px 40px', overflow: 'auto' }}>
+      <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 'calc(20px + env(safe-area-inset-top)) 20px 40px', overflow: 'auto' }}>
         <div style={{ width: '100%', maxWidth: 460 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -811,7 +811,7 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit, cvd }) {
   // ---------- playing ----------
   const s = stateRef.current;
   return (
-    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', padding: '14px 16px 20px' }}>
+    <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', padding: 'calc(14px + env(safe-area-inset-top)) 16px 20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', maxWidth: 520, margin: '0 auto 4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <game.icon size={17} color={game.color} />
