@@ -2873,7 +2873,7 @@ function useHeartRate() {
 // widths are relative to whatever container it's placed in, so it composes
 // correctly whether that container is a full-width chart (ProfileChart) or
 // one workout's slice of a larger multi-workout strip (QueueProfileStrip).
-function SegmentBars({ intervals }) {
+function SegmentBars({ intervals, onSegmentClick }) {
   const cvd = useContext(ColorblindContext);
   const total = totalDuration(intervals) || 1;
   return (
@@ -2884,7 +2884,8 @@ function SegmentBars({ intervals }) {
         const h = Math.max(14, Math.min(100, z.intensity * 78));
         const isFree = it.type === 'free';
         return (
-          <div key={it.id} style={{ width: `${w}%`, height: '100%', display: 'flex', alignItems: 'flex-end', borderRight: `1px solid ${PANEL2}` }}>
+          <div key={it.id} onClick={onSegmentClick ? () => onSegmentClick(it.id) : undefined}
+            style={{ width: `${w}%`, height: '100%', display: 'flex', alignItems: 'flex-end', borderRight: `1px solid ${PANEL2}`, cursor: onSegmentClick ? 'pointer' : 'default' }}>
             <div style={{ width: '100%', height: `${h}%`, background: isFree ? `repeating-linear-gradient(135deg, ${z.color}, ${z.color} 4px, ${LINE} 4px, ${LINE} 8px)` : z.color }} />
           </div>
         );
@@ -2893,10 +2894,10 @@ function SegmentBars({ intervals }) {
   );
 }
 
-function ProfileChart({ intervals, height = 84, progress = null }) {
+function ProfileChart({ intervals, height = 84, progress = null, onSegmentClick }) {
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', height, width: '100%', background: PANEL2, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}` }}>
-      <SegmentBars intervals={intervals} />
+      <SegmentBars intervals={intervals} onSegmentClick={onSegmentClick} />
       {progress !== null && (
         <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${progress * 100}%`, background: 'rgba(255,255,255,0.14)', borderRight: `2px solid ${TEXT}`, pointerEvents: 'none' }} />
       )}
@@ -3101,17 +3102,18 @@ function Confetti({ pieces }) {
 // ---------- small ui atoms ----------
 // A small "i" icon that shows a short explanation on tap. Tap-to-toggle
 // rather than hover, since most of this app is used on a touchscreen.
-function InfoDot({ text }) {
+function InfoDot({ text, icon, openDown }) {
   const [open, setOpen] = useState(false);
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle' }}>
+    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle', flexShrink: 0 }}>
       <button type="button" onClick={e => { e.stopPropagation(); setOpen(o => !o); }} onBlur={() => setOpen(false)}
         aria-label="More info" style={{ background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', display: 'flex', color: SUB, flexShrink: 0 }}>
-        <Info size={14} />
+        {icon || <Info size={14} />}
       </button>
       {open && (
         <div onClick={e => e.stopPropagation()} style={{
-          position: 'absolute', bottom: '100%', left: 0, marginBottom: 6, width: 230, zIndex: 50,
+          position: 'absolute', [openDown ? 'top' : 'bottom']: '100%', left: 0,
+          [openDown ? 'marginTop' : 'marginBottom']: 6, width: 230, zIndex: 50,
           background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 8, padding: 10,
           fontFamily: "'Manrope', sans-serif", fontSize: 11.5, fontWeight: 500, textTransform: 'none', letterSpacing: 'normal',
           color: TEXT, lineHeight: 1.45, boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
@@ -3299,7 +3301,7 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             {workout.pain && <Skull size={18} color={RED} style={{ flexShrink: 0 }} />}
-            {workout.pain && <InfoDot text="These rides are designed to be nearly impossible at your true FTP. You can always dial down the FTP for a taste test." />}
+            {workout.pain && <InfoDot openDown text="These rides are designed to be nearly impossible at your true FTP. You can always dial down the FTP for a taste test." />}
             <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 22, fontWeight: 600, color: TEXT, letterSpacing: 0.3 }}>{workout.name}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
@@ -3990,7 +3992,7 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
           return (
             <div key={w.id} onClick={() => onOpen(w)} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
-                {w.pain && <Skull size={15} color={RED} style={{ flexShrink: 0 }} />}
+                {w.pain && <InfoDot openDown icon={<Skull size={15} color={RED} />} text="These rides are designed to be nearly impossible at your true FTP. You can always dial down the FTP for a taste test." />}
                 <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 700, fontSize: 17, color: TEXT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.name}</div>
                 <button onClick={e => { e.stopPropagation(); onToggleStar(w.id); }} title={starred ? 'Unstar' : 'Star'}
                   style={{ background: 'none', border: 'none', padding: 2, margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -4306,14 +4308,14 @@ const QUICK_BLOCKS = [
   { label: 'Warm up', duration: 300, type: 'power', target: 55 },
   { label: 'Cool down', duration: 300, type: 'power', target: 50 },
   { label: 'Recovery', duration: 120, type: 'power', target: 55 },
+  { label: 'Endurance', duration: 600, type: 'power', target: 70 },
   { label: 'Sweet spot', duration: 480, type: 'power', target: 90 },
   { label: 'Threshold', duration: 300, type: 'power', target: 100 },
   { label: 'VO2 max', duration: 180, type: 'power', target: 115 },
-  { label: 'Sprint', duration: 30, type: 'rpe', target: 10 },
-  { label: 'Free ride', duration: 300, type: 'free', target: null },
+  { label: 'Sprint', duration: 30, type: 'power', target: 160 },
 ];
 
-function IntervalRow({ interval, onChange, onDelete, onMoveUp, onMoveDown, onDuplicate, first, last, selected, onToggleSelect, touched }) {
+function IntervalRow({ interval, onChange, onDelete, onMoveUp, onMoveDown, onDuplicate, first, last, selected, onToggleSelect, touched, rowRef }) {
   const cvd = useContext(ColorblindContext);
   const z = zoneFor(interval, cvd);
   const mins = Math.floor(interval.duration / 60);
@@ -4345,8 +4347,19 @@ function IntervalRow({ interval, onChange, onDelete, onMoveUp, onMoveDown, onDup
     setSecsDraft(String(clamped));
   }
 
+  const [targetDraft, setTargetDraft] = useState(String(interval.target ?? ''));
+  const [targetFocused, setTargetFocused] = useState(false);
+  useEffect(() => { if (!targetFocused) setTargetDraft(String(interval.target ?? '')); }, [interval.target, targetFocused]);
+  function commitTarget() {
+    const n = parseInt(targetDraft, 10);
+    if (!Number.isFinite(n) || targetDraft.trim() === '') { setTargetDraft(String(interval.target ?? '')); return; } // left blank -> keep current
+    const clamped = interval.type === 'rpe' ? Math.min(10, Math.max(0, n)) : Math.min(250, Math.max(0, n));
+    onChange({ ...interval, target: clamped });
+    setTargetDraft(String(clamped));
+  }
+
   return (
-    <div style={{
+    <div ref={rowRef} style={{
       background: PANEL,
       border: touched ? `2px solid var(--accent)` : selected ? `1px solid var(--accent)` : `1px solid ${LINE}`,
       boxShadow: touched ? '0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent)' : 'none',
@@ -4395,7 +4408,11 @@ function IntervalRow({ interval, onChange, onDelete, onMoveUp, onMoveDown, onDup
         </select>
         {interval.type !== 'free' && (
           <>
-            <input type="number" value={interval.target ?? ''} onChange={e => onChange({ ...interval, target: Number(e.target.value) || 0 })}
+            <input type="text" inputMode="numeric" value={targetDraft}
+              onFocus={() => setTargetFocused(true)}
+              onChange={e => setTargetDraft(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))}
+              onBlur={() => { setTargetFocused(false); commitTarget(); }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
               style={{ fontFamily: "'Space Grotesk', sans-serif", width: 52, background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 6, color: TEXT, padding: '5px 6px', fontSize: 13 }} />
             <span style={{ color: SUB, fontSize: 12 }}>{interval.type === 'power' ? '% FTP' : '/ 10'}</span>
           </>
@@ -4664,6 +4681,15 @@ function BuilderView({ customWorkouts, saveCustomWorkout, deleteCustomWorkout, e
   // used for "duplicate/move as a group").
   const [lastTouchedIds, setLastTouchedIds] = useState(() => new Set());
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  // DOM nodes for each interval card, keyed by interval id, so a tap on the
+  // chart above can scroll the matching card into view -- populated via
+  // IntervalRow's rowRef callback below.
+  const rowRefsMap = useRef({});
+  function selectSegment(id) {
+    setLastTouchedIds(new Set([id]));
+    const el = rowRefsMap.current[id];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
   // Admin-only: copies a plain-text export of a workout (human-readable list
   // + ready-to-paste library code) to the clipboard. Falls back to a
   // manually-selectable textarea if the clipboard API is unavailable or
@@ -4932,7 +4958,7 @@ function BuilderView({ customWorkouts, saveCustomWorkout, deleteCustomWorkout, e
 
       {intervals.length > 0 && (
         <div style={{ marginBottom: 14 }}>
-          <ProfileChart intervals={intervals} />
+          <ProfileChart intervals={intervals} onSegmentClick={selectSegment} />
           <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, marginTop: 6 }}>{fmtLong(total)} total · {intervals.length} intervals</div>
         </div>
       )}
@@ -4968,6 +4994,7 @@ function BuilderView({ customWorkouts, saveCustomWorkout, deleteCustomWorkout, e
           onChange={next => updateAt(idx, next)} onDelete={() => removeAt(idx)}
           onMoveUp={() => move(idx, -1)} onMoveDown={() => move(idx, 1)} onDuplicate={() => duplicateAt(idx)}
           selected={selectedIds.has(it.id)} onToggleSelect={() => toggleSelect(it.id)} touched={lastTouchedIds.has(it.id)}
+          rowRef={el => { if (el) rowRefsMap.current[it.id] = el; else delete rowRefsMap.current[it.id]; }}
           first={idx === 0} last={idx === intervals.length - 1} />
       ))}
       {intervals.length === 0 && <div style={{ fontFamily: "'Manrope', sans-serif", color: SUB, fontSize: 13, textAlign: 'center', padding: '20px 0', border: `1px dashed ${LINE}`, borderRadius: 10, marginBottom: 16 }}>No intervals yet — tap a quick add block above to start.</div>}
