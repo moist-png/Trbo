@@ -360,6 +360,7 @@ function DayRow({ day, weekday, library, onOpen, onSwap, onLogOutdoor }) {
 function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardRef, onOpen, onSwap, onCheckin, onLogOutdoor }) {
   const [open, setOpen] = useState(defaultOpen);
   const [pendingMissedReason, setPendingMissedReason] = useState(false);
+  const [editingCheckin, setEditingCheckin] = useState(false);
   const cvd = useContext(ColorblindContext);
   const phaseInfo = PHASE[week.phase];
   const phaseColor = (cvd ? PHASE_COLOR_CVD : PHASE_COLOR)[week.phase] || SUB;
@@ -391,31 +392,42 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
               );
             })}
           </div>
-          {/* Weekly check-in — locked once answered so a week's feedback (and
-              the plan adjustment it already triggered) can't be silently
-              changed after the fact. */}
+          {/* Weekly check-in — locked once answered so it can't be nudged by
+              a stray tap later, but correctable via "Change" for a genuine
+              misclick (applyCheckin cleanly undoes the previous answer's
+              effect before applying the new one, rather than stacking). */}
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
-            {week.checkin ? (
-              <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: SUB, lineHeight: 1.5 }}>
-                You said this week was <span style={{ color: TEXT, fontWeight: 700 }}>{CHECKIN_LABELS[week.checkin] || week.checkin}</span>
-                {week.checkinReason && (week.checkinReason === 'fatigue' ? ' — mostly fatigue.' : ' — mostly schedule.')}
+            {week.checkin && !editingCheckin ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: SUB, lineHeight: 1.5 }}>
+                  You said this week was <span style={{ color: TEXT, fontWeight: 700 }}>{CHECKIN_LABELS[week.checkin] || week.checkin}</span>
+                  {week.checkinReason && (week.checkinReason === 'fatigue' ? ' — mostly fatigue.' : ' — mostly schedule.')}
+                </div>
+                <button onClick={() => setEditingCheckin(true)}
+                  style={{ fontFamily: FONT_BODY, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0 }}>Change</button>
               </div>
             ) : pendingMissedReason ? (
               <>
                 <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB, marginBottom: 8 }}>Was that mostly fatigue, or your schedule?</div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button onClick={() => { onCheckin(week.weekNumber, 'missed-a-lot', 'fatigue'); setPendingMissedReason(false); }}
+                  <button onClick={() => { onCheckin(week.weekNumber, 'missed-a-lot', 'fatigue'); setPendingMissedReason(false); setEditingCheckin(false); }}
                     style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '6px 11px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, cursor: 'pointer' }}>Fatigue</button>
-                  <button onClick={() => { onCheckin(week.weekNumber, 'missed-a-lot', 'schedule'); setPendingMissedReason(false); }}
+                  <button onClick={() => { onCheckin(week.weekNumber, 'missed-a-lot', 'schedule'); setPendingMissedReason(false); setEditingCheckin(false); }}
                     style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '6px 11px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, cursor: 'pointer' }}>Schedule</button>
                 </div>
               </>
             ) : (
               <>
-                <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB, marginBottom: 8 }}>Finished this week? Tell the plan how it felt and it'll tune the weeks ahead:</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 11, color: SUB }}>{week.checkin ? 'Pick the right one:' : "Finished this week? Tell the plan how it felt and it'll tune the weeks ahead:"}</div>
+                  {week.checkin && (
+                    <button onClick={() => setEditingCheckin(false)}
+                      style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0 }}>Cancel</button>
+                  )}
+                </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {[['too-easy', 'Too easy'], ['about-right', 'About right'], ['too-hard', 'Too hard'], ['missed-a-lot', 'Missed a lot']].map(([key, label]) => (
-                    <button key={key} onClick={() => (key === 'missed-a-lot' ? setPendingMissedReason(true) : onCheckin(week.weekNumber, key))}
+                    <button key={key} onClick={() => (key === 'missed-a-lot' ? setPendingMissedReason(true) : (onCheckin(week.weekNumber, key), setEditingCheckin(false)))}
                       style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '6px 11px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, cursor: 'pointer' }}>{label}</button>
                   ))}
                 </div>

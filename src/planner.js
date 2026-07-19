@@ -1380,6 +1380,22 @@ export function validatePlan(plan) {
 // recompute every future week's target. This keeps the ramp-rate and recovery
 // rules valid by construction. Returns a new plan.
 export function applyCheckin(plan, weekNumber, feedback, library, reason) {
+  // If this week already has an answer, the rider is correcting a misclick
+  // rather than answering fresh. Undo that previous answer's one lasting
+  // side effect -- forcing the next week into an unplanned recovery week --
+  // before recomputing below, so a correction starts from a clean slate
+  // instead of stacking a second adjustment on top of the wrong one. (Past
+  // weeks' own already-locked targets never move, so this is safe even if
+  // later weeks have since been checked in too.)
+  let basePlan = plan;
+  const existing = plan.weeks.find(w => w.weekNumber === weekNumber);
+  if (existing && existing.checkin) {
+    const nextIdx = plan.weeks.findIndex(w => w.weekNumber === weekNumber + 1);
+    if (nextIdx >= 0 && plan.weeks[nextIdx].insertedRecovery) {
+      basePlan = { ...plan, weeks: plan.weeks.map((w, i) => (i === nextIdx ? { ...w, isRecovery: false, insertedRecovery: false } : w)) };
+    }
+  }
+
   // feedback: 'too-easy' | 'about-right' | 'too-hard' | 'missed-a-lot'
   // reason (only meaningful for 'missed-a-lot'): 'fatigue' | 'schedule'.
   // A schedule-driven miss isn't a sign the rider was overreaching, so it
@@ -1392,44 +1408,44 @@ export function applyCheckin(plan, weekNumber, feedback, library, reason) {
     : { 'too-easy': 1.08, 'about-right': 1.0, 'too-hard': 0.85, 'missed-a-lot': 0.7 }[feedback] || 1.0;
 
   // Optionally convert the very next week into an unplanned recovery week.
-  let recoveryFlags = plan.weeks.map(w => w.isRecovery);
+  let recoveryFlags = basePlan.weeks.map(w => w.isRecovery);
   if (feedback === 'too-hard' || (feedback === 'missed-a-lot' && !missedScheduleOnly)) {
-    const idx = plan.weeks.findIndex(w => w.weekNumber === weekNumber + 1);
-    if (idx >= 0 && plan.weeks[idx].phase !== 'taper') recoveryFlags[idx] = true;
+    const idx = basePlan.weeks.findIndex(w => w.weekNumber === weekNumber + 1);
+    if (idx >= 0 && basePlan.weeks[idx].phase !== 'taper') recoveryFlags[idx] = true;
   }
 
-  const phaseByWeek = plan.weeks.map(w => w.phase);
+  const phaseByWeek = basePlan.weeks.map(w => w.phase);
 
   // Lock every week up to and including the check-in week to its current
   // target. The feedback factor shifts the baseline the *future* ramps from:
   // the last locked loading week's target is nudged by `factor`, then future
   // weeks ramp continuously from there so no single step can break the cap.
-  const lockedTargets = plan.weeks.map(w => (w.weekNumber <= weekNumber ? w.targetTss : null));
+  const lockedTargets = basePlan.weeks.map(w => (w.weekNumber <= weekNumber ? w.targetTss : null));
 
   // Find the last locked loading week to derive the adjusted future baseline.
-  let baseTss = plan.startWeeklyTss;
-  for (let i = 0; i < plan.weeks.length; i++) {
-    const w = plan.weeks[i];
+  let baseTss = basePlan.startWeeklyTss;
+  for (let i = 0; i < basePlan.weeks.length; i++) {
+    const w = basePlan.weeks[i];
     if (w.weekNumber <= weekNumber && !recoveryFlags[i] && w.phase !== 'taper') baseTss = w.targetTss;
   }
   // The first future loading week should land at baseTss * factor. Since
   // weeklyLoadTargets ramps the baseline up by (1+maxRamp) for the first
   // loading week, divide that step out here so the boundary ramp stays legal.
-  const maxRamp = plan.multiSport ? RAMP.maxRampMulti : RAMP.maxRampSolo;
+  const maxRamp = basePlan.multiSport ? RAMP.maxRampMulti : RAMP.maxRampSolo;
   const adjustedBaseline = Math.max(80, Math.round((baseTss * factor) / (1 + maxRamp)));
 
   const targets = weeklyLoadTargets({
     startWeeklyTss: adjustedBaseline,
     phaseByWeek,
     recoveryFlags,
-    multiSport: plan.multiSport,
+    multiSport: basePlan.multiSport,
     lockedTargets,
   });
 
-  const weeks = plan.weeks.map((w, i) => {
+  const weeks = basePlan.weeks.map((w, i) => {
     if (w.weekNumber === weekNumber) return { ...w, isRecovery: recoveryFlags[i], checkin: feedback, checkinReason: feedback === 'missed-a-lot' ? (reason || null) : null };
     if (w.weekNumber < weekNumber) return { ...w, isRecovery: recoveryFlags[i] };
-    return { ...w, targetTss: targets[i], isRecovery: recoveryFlags[i], insertedRecovery: recoveryFlags[i] && !plan.weeks[i].isRecovery };
+    return { ...w, targetTss: targets[i], isRecovery: recoveryFlags[i], insertedRecovery: recoveryFlags[i] && !basePlan.weeks[i].isRecovery };
   });
 
   const adjusted = { ...plan, weeks };
