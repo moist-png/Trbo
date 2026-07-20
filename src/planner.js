@@ -175,6 +175,35 @@ export const WORKOUT_PURPOSE = {
   'ride-garden-path-spin': 'recovery',
   'ride-quiet-streets-loop': 'recovery',
   'ride-watermill-loop': 'endurance',
+  // --- 25 new rides: fill three under-served duration bands (20-30min,
+  // 30-50min, 51-75min). Zero climbing added on purpose (already over-
+  // represented); the four crit/race rides are the library's first sub-75min
+  // race simulations. ---
+  'ride-loose-legs-spin': 'recovery',
+  'ride-flush-lap': 'recovery',
+  'ride-short-fuse': 'vo2max',
+  'ride-three-minute-warning': 'vo2max',
+  'ride-matchstick': 'anaerobic',
+  'ride-commuter-miles': 'endurance',
+  'ride-fireroad-amble': 'endurance',
+  'ride-towpath-ramble': 'endurance',
+  'ride-downtown-crit': 'race',
+  'ride-alley-sprint-series': 'race',
+  'ride-chase-group': 'race',
+  'ride-redline-ledge': 'threshold',
+  'ride-steady-burn': 'threshold',
+  'ride-corridor-run': 'sweetspot',
+  'ride-ridge-line': 'sweetspot',
+  'ride-long-straightaway': 'tempo',
+  'ride-steady-state-special': 'tempo',
+  'ride-cruise-control': 'tempo',
+  'ride-wide-open-road': 'tempo',
+  'ride-overpass-circuit': 'sweetspot',
+  'ride-backbone-ridge': 'sweetspot',
+  'ride-causeway-crossing': 'sweetspot',
+  'ride-anvil-work': 'threshold',
+  'ride-the-grind': 'threshold',
+  'ride-midweek-crit': 'race',
 };
 
 // Human-readable labels for each purpose (used in the UI on day rows).
@@ -356,6 +385,32 @@ export const WORKOUT_TERRAIN = {
   'ride-garden-path-spin': ['scenic', 'flat'],
   'ride-quiet-streets-loop': ['scenic', 'rolling'],
   'ride-watermill-loop': ['flat', 'scenic'],
+  // --- 25 new rides (duration-gap fill) ---
+  'ride-loose-legs-spin': ['scenic'],
+  'ride-flush-lap': ['scenic'],
+  'ride-short-fuse': ['punchy'],
+  'ride-three-minute-warning': ['punchy'],
+  'ride-matchstick': ['punchy', 'urban'],
+  'ride-commuter-miles': ['flat', 'urban'],
+  'ride-fireroad-amble': ['rolling', 'gravel'],
+  'ride-towpath-ramble': ['flat', 'scenic'],
+  'ride-downtown-crit': ['criterium', 'urban'],
+  'ride-alley-sprint-series': ['criterium', 'punchy'],
+  'ride-chase-group': ['paceline', 'punchy'],
+  'ride-redline-ledge': ['sustained-climb'],
+  'ride-steady-burn': ['mixed'],
+  'ride-corridor-run': ['flat', 'scenic'],
+  'ride-ridge-line': ['rolling'],
+  'ride-long-straightaway': ['flat', 'windy'],
+  'ride-steady-state-special': ['flat'],
+  'ride-cruise-control': ['flat', 'scenic'],
+  'ride-wide-open-road': ['flat', 'windy'],
+  'ride-overpass-circuit': ['flat', 'urban'],
+  'ride-backbone-ridge': ['rolling', 'sustained-climb'],
+  'ride-causeway-crossing': ['flat', 'windy'],
+  'ride-anvil-work': ['mixed'],
+  'ride-the-grind': ['mixed'],
+  'ride-midweek-crit': ['criterium', 'paceline'],
 };
 
 // Human-readable labels for each terrain tag (for any UI that surfaces them).
@@ -364,6 +419,7 @@ export const TERRAIN_LABEL = {
   steep: 'Steep', punchy: 'Punchy', cobbles: 'Cobbles', gravel: 'Gravel',
   windy: 'Windy', mixed: 'Mixed', scenic: 'Scenic',
   hairpins: 'Hairpins', 'multi-climb': 'Multi-climb',
+  urban: 'Urban', criterium: 'Criterium', paceline: 'Paceline',
 };
 
 // Which purposes count as "high stress" for the hard/easy spacing rule.

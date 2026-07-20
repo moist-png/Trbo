@@ -2503,6 +2503,321 @@ const LIBRARY = [
     ],
   },
 
+  // ---------- 25 new rides: duration-gap fill (20-30 / 30-50 / 51-75min) ----------
+  // A duration audit found three under-served bands: 20-30min (only 1 ride),
+  // 30-50min (no endurance, no race), and 51-75min (no tempo). These 25 fill
+  // them, weighted toward the purposes most conspicuously absent in each band
+  // and deliberately adding zero climbing content (already the most
+  // over-represented purpose). Every one is built from repeatIv() oscillating
+  // phases rather than flat blocks, matching the Hollow Road / Tableland v2
+  // style directly above. The four crit/race rides (Downtown Crit, Alley
+  // Sprint Series, Chase Group, Midweek Crit) are the library's first sub-75min
+  // race simulations -- genuinely variable attack/settle/surge structures, not
+  // single-target blocks wearing a race tag.
+
+  // --- 20-30min bucket (2 recovery, 2 vo2max, 1 anaerobic) ---
+  {
+    id: 'ride-loose-legs-spin', name: 'Loose Legs Spin', category: 'Rides',
+    description: "An easy, unhurried spin with a gentle float through the back half — pure legs-only recovery, nothing to chase.",
+    intervals: [
+      iv('Warm up', 120, 'power', 55),
+      ...repeatIv(4, () => [iv('Ease', 90, 'power', 57), iv('Loose', 90, 'power', 52)]),
+      ...repeatIv(3, () => [iv('Float', 80, 'power', 59), iv('Settle', 60, 'power', 54)]),
+      iv('Cool down', 60, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-flush-lap', name: 'Flush Lap', category: 'Rides',
+    description: "A slightly longer flush ride for the day after something hard — drifts even easier through the second half.",
+    intervals: [
+      iv('Warm up', 150, 'power', 56),
+      ...repeatIv(5, () => [iv('Turn', 80, 'power', 58), iv('Ease', 70, 'power', 53)]),
+      ...repeatIv(4, () => [iv('Float', 60, 'power', 60), iv('Drift', 45, 'power', 52)]),
+      iv('Cool down', 180, 'power', 48),
+    ],
+  },
+  {
+    id: 'ride-short-fuse', name: 'Short Fuse', category: 'Rides',
+    description: "Classic 30-on/30-off VO2 max intervals in two waves with a short breather between — quick, sharp, done before lunch.",
+    intervals: [
+      iv('Warm up', 240, 'power', 58),
+      iv('Opener', 60, 'power', 85),
+      ...repeatIv(10, () => [iv('On', 30, 'power', 118), iv('Off', 30, 'power', 55)]),
+      iv('Recover', 120, 'power', 55),
+      ...repeatIv(4, () => [iv('On', 30, 'power', 122), iv('Off', 30, 'power', 55)]),
+      iv('Cool down', 180, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-three-minute-warning', name: 'Three Minute Warning', category: 'Rides',
+    description: "Three-minute VO2 efforts that build in two steps rather than holding flat — fewer reps, more sustained bite.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      iv('Opener', 60, 'power', 88),
+      ...repeatIv(3, () => [iv('Build', 90, 'power', 110), iv('Push', 90, 'power', 116), iv('Off', 180, 'power', 58)]),
+      iv('Cool down', 180, 'power', 50),
+    ],
+  },
+  {
+    id: 'ride-matchstick', name: 'Matchstick', category: 'Rides',
+    description: "A sprint ladder that climbs in intensity then eases back down — ten short, sharp efforts between a proper warm-up and cool-down.",
+    intervals: [
+      iv('Warm up', 240, 'power', 58),
+      iv('Opener', 20, 'power', 92),
+      iv('Settle', 100, 'power', 56),
+      iv('Rung 1', 8, 'power', 150), iv('Recover', 52, 'power', 56),
+      iv('Rung 2', 12, 'power', 145), iv('Recover', 58, 'power', 56),
+      iv('Rung 3', 15, 'power', 140), iv('Recover', 65, 'power', 56),
+      iv('Rung 4', 18, 'power', 138), iv('Recover', 62, 'power', 56),
+      iv('Rung 5', 10, 'power', 155), iv('Recover', 60, 'power', 56),
+      iv('Rung 6', 20, 'power', 135), iv('Recover', 70, 'power', 56),
+      iv('Rung 7', 20, 'power', 130), iv('Recover', 70, 'power', 56),
+      iv('Rung 8', 15, 'power', 140), iv('Recover', 65, 'power', 56),
+      iv('Rung 9', 12, 'power', 145), iv('Recover', 58, 'power', 56),
+      iv('Rung 10', 8, 'power', 150), iv('Recover', 52, 'power', 56),
+      iv('Cool down', 210, 'power', 50),
+    ],
+  },
+
+  // --- 30-50min bucket (3 endurance, 3 race, 2 threshold, 2 sweetspot) ---
+  {
+    id: 'ride-commuter-miles', name: 'Commuter Miles', category: 'Rides',
+    description: "A simple rolling endurance spin for the days you've only got half an hour-ish to give.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      ...repeatIv(7, () => [iv('Roll', 120, 'power', 70), iv('Ease', 90, 'power', 63)]),
+      iv('Cool down', 240, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-fireroad-amble', name: 'Fireroad Amble', category: 'Rides',
+    description: "Rolling endurance with a slightly punchier back half — two distinct wave patterns rather than one held pace.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      ...repeatIv(5, () => [iv('Roll', 150, 'power', 72), iv('Ease', 100, 'power', 63)]),
+      ...repeatIv(3, () => [iv('Rise', 90, 'power', 78), iv('Settle', 90, 'power', 65)]),
+      iv('Cool down', 240, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-towpath-ramble', name: 'Towpath Ramble', category: 'Rides',
+    description: "Long, flat, and steady — the closest thing in this batch to a genuine easy cruise.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      ...repeatIv(9, () => [iv('Steady', 140, 'power', 69), iv('Ease', 100, 'power', 62)]),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-downtown-crit', name: 'Downtown Crit', category: 'Rides',
+    description: "The library's first short-format race simulation — attack, get chased down, settle, repeat, with a bridge effort and a field sprint to close.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      iv('Opener', 15, 'power', 100),
+      ...repeatIv(6, () => [iv('Attack', 25, 'power', 112), iv('Chase', 40, 'power', 90), iv('Settle', 100, 'power', 65)]),
+      iv('Bridge effort', 45, 'power', 105),
+      iv('Recover', 120, 'power', 62),
+      ...repeatIv(4, () => [iv('Counter', 20, 'power', 115), iv('Recover', 60, 'power', 66)]),
+      iv('Sprint for the line', 15, 'power', 130),
+      iv('Cool down', 240, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-alley-sprint-series', name: 'Alley Sprint Series', category: 'Rides',
+    description: "A sprint-heavy crit simulation — eight jumps out of the corners plus a late attack and a closing sprint.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      iv('Opener', 15, 'power', 98),
+      ...repeatIv(8, () => [iv('Jump', 15, 'power', 128), iv('Roll it out', 45, 'power', 88), iv('Settle', 100, 'power', 64)]),
+      iv('Late attack', 30, 'power', 115),
+      iv('Recover', 90, 'power', 62),
+      ...repeatIv(3, () => [iv('Jump', 15, 'power', 130), iv('Roll it out', 45, 'power', 86)]),
+      iv('Sprint for the line', 15, 'power', 132),
+      iv('Cool down', 240, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-chase-group', name: 'Chase Group', category: 'Rides',
+    description: "A bridging narrative — off the front, sit up, a bridge attempt, counters in the group, a late attack, and a sprint for the line.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      iv('Opener', 20, 'power', 100),
+      ...repeatIv(5, () => [iv('Off the front', 60, 'power', 108), iv('Sit up', 120, 'power', 70)]),
+      iv('Bridge attempt', 50, 'power', 118),
+      iv('Recover in the group', 180, 'power', 68),
+      ...repeatIv(6, () => [iv('Counter', 30, 'power', 120), iv('Recover', 70, 'power', 66)]),
+      iv('Late attack', 40, 'power', 116),
+      iv('Recover', 100, 'power', 66),
+      iv('Sprint for the line', 15, 'power', 132),
+      iv('Cool down', 270, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-redline-ledge', name: 'Redline Ledge', category: 'Rides',
+    description: "2×12 threshold, each interval built from alternating hold/push micro-blocks instead of one flat target.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      iv('Opener', 60, 'power', 88),
+      ...repeatIv(2, () => [
+        ...repeatIv(4, () => [iv('Hold', 90, 'power', 98), iv('Push', 90, 'power', 103)]),
+        iv('Recover', 240, 'power', 62),
+      ]),
+      iv('Cool down', 240, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-steady-burn', name: 'Steady Burn', category: 'Rides',
+    description: "3×10 threshold with the same hold/push texture as Redline Ledge, spread across three blocks instead of two.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      iv('Opener', 60, 'power', 88),
+      ...repeatIv(3, () => [
+        ...repeatIv(5, () => [iv('Hold', 60, 'power', 97), iv('Push', 60, 'power', 102)]),
+        iv('Recover', 180, 'power', 62),
+      ]),
+      iv('Cool down', 240, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-corridor-run', name: 'Corridor Run', category: 'Rides',
+    description: "A compact sweet spot ride — two rolling phases, same undulating style as Hollow Road Sweet Spot.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      ...repeatIv(5, () => [iv('Rise', 90, 'power', 91), iv('Ease', 60, 'power', 85)]),
+      iv('Recover', 180, 'power', 60),
+      ...repeatIv(4, () => [iv('Rise', 80, 'power', 92), iv('Ease', 60, 'power', 86)]),
+      iv('Cool down', 240, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-ridge-line', name: 'Ridge Line', category: 'Rides',
+    description: "A longer cousin of Corridor Run — more reps per phase, same rolling sweet spot character.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      ...repeatIv(6, () => [iv('Rise', 100, 'power', 90), iv('Ease', 70, 'power', 84)]),
+      iv('Recover', 210, 'power', 60),
+      ...repeatIv(5, () => [iv('Rise', 90, 'power', 92), iv('Ease', 60, 'power', 86)]),
+      iv('Cool down', 270, 'power', 52),
+    ],
+  },
+
+  // --- 51-75min bucket (4 tempo, 3 sweetspot, 2 threshold, 1 race) ---
+  {
+    id: 'ride-long-straightaway', name: 'Long Straightaway', category: 'Rides',
+    description: "Straightforward rolling tempo, one wave pattern held for the whole ride.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      ...repeatIv(13, () => [iv('Push', 125, 'power', 79), iv('Ease', 85, 'power', 72)]),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-steady-state-special', name: 'Steady State Special', category: 'Rides',
+    description: "Tempo in two blocks with a breather between — the second block runs slightly harder than the first.",
+    intervals: [
+      iv('Warm up', 300, 'power', 58),
+      ...repeatIv(7, () => [iv('Push', 150, 'power', 80), iv('Ease', 90, 'power', 73)]),
+      iv('Recover', 180, 'power', 62),
+      ...repeatIv(4, () => [iv('Push', 120, 'power', 81), iv('Ease', 80, 'power', 74)]),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-cruise-control', name: 'Cruise Control', category: 'Rides',
+    description: "The gentlest of the four new tempo rides — long, evenly paced rolling waves.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      ...repeatIv(11, () => [iv('Push', 130, 'power', 79), iv('Ease', 90, 'power', 72)]),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-wide-open-road', name: 'Wide Open Road', category: 'Rides',
+    description: "The longest of the four tempo rides — two blocks either side of a recovery, building slightly into the second.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      ...repeatIv(8, () => [iv('Push', 160, 'power', 80), iv('Ease', 100, 'power', 73)]),
+      iv('Recover', 210, 'power', 62),
+      ...repeatIv(5, () => [iv('Push', 140, 'power', 81), iv('Ease', 90, 'power', 74)]),
+      iv('Cool down', 330, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-overpass-circuit', name: 'Overpass Circuit', category: 'Rides',
+    description: "Two rolling sweet spot phases with a recovery between — the mid-length sibling of Corridor Run and Ridge Line.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      ...repeatIv(6, () => [iv('Rise', 110, 'power', 90), iv('Ease', 80, 'power', 84)]),
+      iv('Recover', 240, 'power', 60),
+      ...repeatIv(6, () => [iv('Rise', 100, 'power', 92), iv('Ease', 70, 'power', 85)]),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-backbone-ridge', name: 'Backbone Ridge', category: 'Rides',
+    description: "A full hour of rolling sweet spot, with a longer warm-up to match the length.",
+    intervals: [
+      iv('Warm up', 420, 'power', 58),
+      ...repeatIv(7, () => [iv('Rise', 120, 'power', 90), iv('Ease', 90, 'power', 84)]),
+      iv('Recover', 240, 'power', 60),
+      ...repeatIv(6, () => [iv('Rise', 110, 'power', 92), iv('Ease', 80, 'power', 85)]),
+      iv('Cool down', 330, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-causeway-crossing', name: 'Causeway Crossing', category: 'Rides',
+    description: "The longest and hardest of the three new sweet spot rides — two extended rolling phases.",
+    intervals: [
+      iv('Warm up', 420, 'power', 58),
+      ...repeatIv(8, () => [iv('Rise', 130, 'power', 90), iv('Ease', 90, 'power', 84)]),
+      iv('Recover', 270, 'power', 60),
+      ...repeatIv(7, () => [iv('Rise', 110, 'power', 92), iv('Ease', 80, 'power', 85)]),
+      iv('Cool down', 360, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-anvil-work', name: 'Anvil Work', category: 'Rides',
+    description: "3×12 threshold with the hold/push texture, same family as Redline Ledge and Steady Burn but a full hour.",
+    intervals: [
+      iv('Warm up', 360, 'power', 58),
+      iv('Opener', 60, 'power', 88),
+      ...repeatIv(3, () => [
+        ...repeatIv(6, () => [iv('Hold', 60, 'power', 98), iv('Push', 60, 'power', 103)]),
+        iv('Recover', 240, 'power', 62),
+      ]),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-the-grind', name: 'The Grind', category: 'Rides',
+    description: "2×20 threshold — the classic long-block protocol, same hold/push texture running through each 20.",
+    intervals: [
+      iv('Warm up', 420, 'power', 58),
+      iv('Opener', 60, 'power', 88),
+      ...repeatIv(2, () => [
+        ...repeatIv(10, () => [iv('Hold', 60, 'power', 97), iv('Push', 60, 'power', 102)]),
+        iv('Recover', 300, 'power', 62),
+      ]),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+  {
+    id: 'ride-midweek-crit', name: 'Midweek Crit', category: 'Rides',
+    description: "A longer race simulation filling the gap right below the library's previous shortest race ride (74min) — attacks, chases, counters, a bridge, a sprint.",
+    intervals: [
+      iv('Warm up', 390, 'power', 58),
+      iv('Opener', 20, 'power', 100),
+      ...repeatIv(9, () => [iv('Attack', 25, 'power', 112), iv('Chase', 40, 'power', 90), iv('Settle', 110, 'power', 65)]),
+      iv('Bridge effort', 50, 'power', 106),
+      iv('Recover', 150, 'power', 64),
+      ...repeatIv(8, () => [iv('Counter', 20, 'power', 116), iv('Recover', 65, 'power', 66)]),
+      iv('Late attack', 40, 'power', 116),
+      iv('Recover', 90, 'power', 66),
+      iv('Sprint for the line', 15, 'power', 132),
+      iv('Cool down', 300, 'power', 52),
+    ],
+  },
+
   // ---------- "pain" workouts ----------
   // Deliberately, wildly over-tough sessions -- built to be close to
   // impossible on a pure FTP-percentage basis. They're marked `pain: true`
