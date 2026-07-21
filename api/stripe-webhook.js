@@ -77,16 +77,20 @@ export default async function handler(req, res) {
         // handler flips access off then.
         const isActive = ['active', 'trialing', 'past_due'].includes(subscription.status);
 
-        // A paused subscription keeps the status "active" -- Stripe simply
-        // stops collecting. So status alone can't tell us whether to grant
-        // access; without the two fields below, pausing would hand out a
-        // free membership forever. We record the pause and the date the
-        // already-paid-for period ends, and the app cuts access after it.
-        const paused = !!subscription.pause_collection;
+        // "Paused" here means cancel_at_period_end: billing has stopped and
+        // the membership will end when the paid-for period does. Reading it
+        // off the subscription (rather than only writing it in our own
+        // endpoint) means a pause or resume done straight from the Stripe
+        // Dashboard syncs back correctly too.
+        //
+        // Once the subscription is actually gone there is nothing left to
+        // resume, so the paused flag is cleared -- otherwise the app would
+        // keep offering a Resume button that could never work.
+        const ended = event.type === 'customer.subscription.deleted' || !isActive;
+        const paused = ended ? false : !!subscription.cancel_at_period_end;
 
-        // Stripe moved current_period_end from the subscription onto its
-        // items in newer API versions. Read whichever one this account's
-        // version provides rather than assuming.
+        // Stripe moved current_period_end onto subscription items in newer
+        // API versions. Read whichever one this account's version provides.
         const periodEndSeconds =
           subscription.current_period_end ??
           subscription.items?.data?.[0]?.current_period_end ??
@@ -94,8 +98,8 @@ export default async function handler(req, res) {
         const paidThrough = periodEndSeconds ? new Date(periodEndSeconds * 1000).toISOString() : null;
 
         const update = { subscribed: isActive, subscription_paused: paused };
-        // Don't blank an existing date if this particular event didn't
-        // carry one -- a null here would read as "paid through never".
+        // Don't blank an existing date if this particular event didn't carry
+        // one -- a null here would read as "paid through never".
         if (paidThrough) update.subscription_paid_through = paidThrough;
 
         await supabaseAdmin

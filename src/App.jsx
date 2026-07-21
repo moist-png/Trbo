@@ -7035,9 +7035,9 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
               label={subscriptionPaused ? 'Membership paused' : 'Taking a break?'}
               sub={subscriptionPaused
                 ? (subscriptionPaidThrough
-                    ? `You won't be charged again. Access runs until ${new Date(subscriptionPaidThrough).toLocaleDateString()}, then resume any time to pick up where you left off.`
-                    : "You won't be charged again. Resume any time to pick up where you left off.")
-                : 'Pause billing over the off-season. Your plan, history and FTP all stay put, and you keep riding until the month you\u2019ve already paid for runs out.'}
+                    ? `You won't be charged again. You can keep riding until ${new Date(subscriptionPaidThrough).toLocaleDateString()} \u2014 resume before then and nothing changes. After that your membership ends, and you'd start a fresh one when you're ready.`
+                    : "You won't be charged again. Resume any time before your paid period ends.")
+                : 'Stop billing over the off-season. Your workouts, history, FTP and training plan all stay exactly as they are, and you keep riding until the time you\u2019ve already paid for runs out.'}
             >
               {subscriptionPaused ? (
                 <button onClick={() => setPaused(false)} disabled={pauseBusy} style={{ fontFamily: "'Manrope', sans-serif", padding: '7px 12px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 12.5, cursor: pauseBusy ? 'default' : 'pointer', opacity: pauseBusy ? 0.6 : 1 }}>
@@ -7476,10 +7476,41 @@ function TrialBanner({ daysLeft, onUpgrade }) {
   );
 }
 
-function PaywallView({ blocking, trialExpired, onClose, onLogout, userId, email }) {
+function PaywallView({ blocking, trialExpired, onClose, onLogout, userId, email, subscriptionPaused, subscriptionPaidThrough }) {
   const [error, setError] = useState('');
   const [redirecting, setRedirecting] = useState(false);
   const [plan, setPlan] = useState('monthly');
+  const [resuming, setResuming] = useState(false);
+
+  // Safety net. By design a paused membership still has access, so a paused
+  // rider should never land on this screen -- they'd resume from Settings.
+  // But if a webhook were ever missed, our records could say "paused" while
+  // access had already lapsed, and the rider would be stranded here with no
+  // way back to their subscription. This gives them one. If the server finds
+  // the subscription is genuinely over it clears the flag and tells us to
+  // fall back to normal checkout.
+  async function resumeMembership() {
+    setError('');
+    setResuming(true);
+    try {
+      const res = await apiFetch('/api/pause-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resume' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.resumed) { window.location.reload(); return; }
+      if (data.requiresCheckout) {
+        setError(data.error || 'That membership has ended \u2014 you can start a new one below.');
+        setResuming(false);
+        return;
+      }
+      throw new Error(data.error || 'Could not resume your membership.');
+    } catch (err) {
+      setError(err.message || 'Something went wrong. Please try again.');
+      setResuming(false);
+    }
+  }
 
   async function startCheckout() {
     setError('');
@@ -7510,6 +7541,20 @@ function PaywallView({ blocking, trialExpired, onClose, onLogout, userId, email 
       <div style={{ fontSize: 13, color: SUB, textAlign: 'center', marginBottom: 20 }}>
         {trialExpired ? 'Subscribe to keep access to your workouts and the trainer connection.' : 'Lock in your subscription now so there’s no interruption when your trial ends.'}
       </div>
+
+      {subscriptionPaused && (
+        <div style={{ border: `1px solid ${LINE}`, borderRadius: 12, padding: '14px 14px 12px', marginBottom: 18, background: PANEL2 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: TEXT, marginBottom: 4 }}>Your membership is paused</div>
+          <div style={{ fontSize: 12.5, color: SUB, marginBottom: 10 }}>
+            {subscriptionPaidThrough
+              ? `It was set to end on ${new Date(subscriptionPaidThrough).toLocaleDateString()}. Resume to pick it straight back up \u2014 same plan, same price.`
+              : 'Resume to pick it straight back up \u2014 same plan, same price.'}
+          </div>
+          <button onClick={resumeMembership} disabled={resuming} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 13.5, cursor: resuming ? 'default' : 'pointer', opacity: resuming ? 0.6 : 1 }}>
+            {resuming ? 'Resuming\u2026' : 'Resume membership'}
+          </button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         <button onClick={() => setPlan('monthly')} style={{ flex: 1, textAlign: 'left', padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${plan === 'monthly' ? 'var(--accent)' : LINE}`, background: plan === 'monthly' ? PANEL2 : 'transparent', cursor: 'pointer' }}>
@@ -8639,7 +8684,7 @@ export default function App() {
     return (
       <div style={wrapStyle}>
         <style>{globalStyle}</style>
-        <PaywallView blocking trialExpired onLogout={handleLogout} userId={user.id} email={user.email} />
+        <PaywallView blocking trialExpired onLogout={handleLogout} userId={user.id} email={user.email} subscriptionPaused={subscriptionPaused} subscriptionPaidThrough={profile.subscription_paid_through} />
       </div>
     );
   }

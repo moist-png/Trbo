@@ -1043,14 +1043,23 @@ grant select (
 -- 22. Subscription pause ("seasonal rider"). Riders who stop training over
 --     winter can pause billing instead of cancelling outright.
 --
---     How it works: pausing sets `pause_collection` on the Stripe
---     subscription, which stops Stripe charging the card. Crucially the
---     subscription's *status* stays "active" the whole time it's paused --
---     so the status check in api/stripe-webhook.js alone would happily
---     grant free access forever. These two columns are what prevent that:
---     the webhook records that the subscription is paused and the date the
---     already-paid-for period runs out, and the app grants access only
---     until that date passes.
+--     How it works: pausing sets `cancel_at_period_end` on the Stripe
+--     subscription. Billing stops immediately, the rider keeps riding until
+--     the period they've already paid for runs out, and Stripe then ends
+--     the subscription cleanly on its own. Resuming before that date simply
+--     clears the flag and normal billing carries on.
+--
+--     (Stripe's `pause_collection` was the obvious candidate and is the
+--     wrong tool: it keeps rolling the billing period over and voiding each
+--     invoice, so the paid-through date keeps moving, access never lapses,
+--     and a rider could pause an annual plan and return to nearly a free
+--     year. It also leaves dormant subscriptions behind forever.)
+--
+--     `subscription_paused` mirrors cancel_at_period_end and
+--     `subscription_paid_through` records when access runs out. Because
+--     pause ends at exactly the moment access does, a rider can only ever
+--     be paused while they still have access -- there's no state where
+--     someone is paused but locked out of the app.
 alter table public.profiles add column if not exists subscription_paused boolean not null default false;
 alter table public.profiles add column if not exists subscription_paid_through timestamptz;
 

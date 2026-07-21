@@ -177,6 +177,60 @@ check — Settings → Billing → Subscriptions and emails: confirm smart
 retries are on and the after-final-failure outcome is set to cancel the
 subscription.
 
+### 4.2 Subscription pause — ✅ REBUILT 21 July 2026 (cancel_at_period_end)
+
+Superseding the first cut below. Two defects were found in it and the
+mechanism was changed as a result.
+
+**Defects in the first attempt:**
+1. `pause_collection` keeps the subscription alive indefinitely: Stripe
+   rolls the period over and voids each invoice, so paid-through kept
+   moving, access never lapsed honestly, and resuming after a lapse
+   charged nothing until the next rollover (up to ~11 free months on
+   annual). Dormant subscriptions also accumulated for riders who never
+   returned.
+2. Worse: the Resume button lived in Settings, which sits behind the
+   blocking paywall. A paused rider whose access lapsed was stranded —
+   the only available action was Upgrade, which created a *second* live
+   subscription and orphaned the first.
+
+**The fix — `cancel_at_period_end` instead of `pause_collection`.**
+Billing stops at once, the rider keeps riding to the end of the period
+they paid for, then Stripe ends it cleanly by itself. Resuming before
+that date just clears the flag; normal billing continues with no gap and
+no free window. The key property: **paused and has-access now end at the
+same instant**, so the stranded state from defect 2 cannot occur at all,
+rather than being patched around.
+
+Also shipped:
+- `create-checkout-session` refuses a second checkout while a live
+  subscription exists (checks Stripe directly, not our own flag, since
+  the point is to catch drift between the two). Stale ids for genuinely
+  dead subscriptions fall through so returning riders aren't blocked.
+- Webhook reads pause state from `cancel_at_period_end` (so a pause done
+  from the Stripe Dashboard syncs back) and clears the flag when the
+  subscription ends, so no Resume button is ever offered for a dead
+  subscription.
+- Paywall keeps a Resume button as a pure safety net for a missed
+  webhook; the endpoint verifies against Stripe and, if the subscription
+  is gone, clears our flags and routes to checkout.
+- Endpoint recovers from a dead/missing subscription id rather than
+  erroring.
+
+**Verified** with a seven-scenario lifecycle simulation (resume before
+period end, seasonal lapse and return, stranded-state search across the
+whole window, missed webhook, duplicate-checkout attempts across four
+subscription statuses, past_due-while-paused, comped tester with an old
+subscription). No stranded state, no free-access window, no duplicate
+subscription path.
+
+**Still requires:** running `supabase-setup.sql` (section 22), and a
+live-mode test on Hubert's own account — pause, confirm no charge and
+access to period end, resume, confirm normal billing resumes.
+Stripe test clocks are the tool for the full-lapse path.
+
+---
+
 ### 4.2 Subscription pause — ✅ SHIPPED 21 July 2026 (custom build, not portal)
 
 Pause is live via our own endpoint, since Stripe's portal doesn't offer

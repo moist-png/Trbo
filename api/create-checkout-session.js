@@ -64,6 +64,38 @@ export default async function handler(req, res) {
     const { plan } = req.body || {};
     const userId = verifiedUser.id;
     const email = verifiedUser.email;
+
+    // Guard against ending up with two live subscriptions on one account.
+    // The way that used to happen: a rider whose membership looked inactive
+    // to the app pressed Upgrade, checked out again, and the webhook
+    // overwrote stripe_subscription_id -- leaving the first subscription
+    // still billing on Stripe but invisible here. We check Stripe itself
+    // rather than trusting our own `subscribed` flag, since the whole point
+    // is to catch the case where the two have drifted apart.
+    const { data: existingProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('stripe_subscription_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (existingProfile?.stripe_subscription_id) {
+      try {
+        const existing = await stripe.subscriptions.retrieve(existingProfile.stripe_subscription_id);
+        const stillLive = !['canceled', 'incomplete_expired'].includes(existing.status);
+        if (stillLive) {
+          res.status(409).json({
+            error: 'You already have a membership on this account. Open Settings to manage or resume it.',
+            alreadySubscribed: true,
+          });
+          return;
+        }
+      } catch (lookupErr) {
+        // Subscription genuinely gone from Stripe -- fall through and let
+        // them subscribe again rather than blocking on a stale id.
+        console.error('Ignoring stale stripe_subscription_id during checkout:', lookupErr?.message);
+      }
+    }
+
     const isAnnual = plan === 'annual';
     const priceId = isAnnual ? ANNUAL_PRICE_ID : MONTHLY_PRICE_ID;
 
