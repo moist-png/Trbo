@@ -579,6 +579,37 @@ export const GOALS = {
 };
 
 // ---------------------------------------------------------------------------
+// 3b. Humble FTP estimate (Stage 4 onboarding)
+// ---------------------------------------------------------------------------
+// For riders who have never done an FTP test. Weight + an honest
+// self-assessment gives a STARTING POINT -- deliberately conservative,
+// clearly labelled as an estimate in the UI, and always paired with a real
+// test scheduled into week 1 (see `scheduleTestWeek1` in generatePlan). The
+// W/kg anchors sit at the low end of published recreational ranges, because
+// a first structured week that's slightly too easy costs nothing while one
+// that's too hard costs confidence.
+// ---------------------------------------------------------------------------
+const FTP_ESTIMATE_WKG = {
+  'new-to-riding': 1.7,   // little or no regular riding yet
+  'ride-casually': 2.1,   // rides sometimes, nothing structured
+  'ride-often': 2.6,      // several rides most weeks
+  'ride-strong': 3.1,     // fit, fast group rides / racing background
+};
+export const FTP_SELF_ASSESSMENTS = [
+  { key: 'new-to-riding', label: 'New to riding' },
+  { key: 'ride-casually', label: 'Ride casually' },
+  { key: 'ride-often', label: 'Ride often' },
+  { key: 'ride-strong', label: 'Fit & fast' },
+];
+export function estimateFtpFromProfile(weightKg, selfAssessment) {
+  const w = Number(weightKg);
+  if (!w || w < 30 || w > 200) return null;
+  const wkg = FTP_ESTIMATE_WKG[selfAssessment];
+  if (!wkg) return null;
+  return Math.round(w * wkg);
+}
+
+// ---------------------------------------------------------------------------
 // 4. Phase model
 // ---------------------------------------------------------------------------
 // Given a total number of weeks, split them into phases. Longer plans get a
@@ -592,7 +623,7 @@ export const PHASE = {
   taper: { key: 'taper', label: 'Taper', blurb: 'Volume drops but intensity stays, so you arrive fresh and still sharp.' },
 };
 
-export function planPhases(totalWeeks, hasEvent) {
+export function planPhases(totalWeeks, hasEvent, goalKey = null, riderAgeBand = null) {
   // Returns an array of phase keys, one per week, length === totalWeeks.
   const weeks = Math.max(4, Math.round(totalWeeks));
   if (!hasEvent) {
@@ -603,8 +634,17 @@ export function planPhases(totalWeeks, hasEvent) {
     for (let i = 0; i < weeks; i++) out.push(i < baseLen ? 'base' : 'build');
     return out;
   }
-  // Event plan: taper is 1 week for short plans, 2 for 8+ weeks.
-  const taperLen = weeks >= 8 ? 2 : 1;
+  // Taper individualisation (Stage 4): default 1 week for short plans, 2 for
+  // 8+. Short, intense events (crit, TT, hill climb) keep the taper short
+  // and sharp regardless of plan length -- shedding too much volume before a
+  // 30-60min effort costs snap. Long endurance days keep the fuller
+  // wind-down. 55+ earns one extra taper week on longer plans (recovery
+  // genuinely runs slower with age -- the same light-touch nudge used for
+  // hard-day counts and deload cadence).
+  const SHORT_SHARP_GOALS = new Set(['road-race', 'time-trial', 'hill-climb']);
+  let taperLen = weeks >= 8 ? 2 : 1;
+  if (goalKey && SHORT_SHARP_GOALS.has(goalKey)) taperLen = 1;
+  if (riderAgeBand === '55plus' && weeks >= 8) taperLen = Math.min(3, taperLen + 1);
   const peakLen = weeks >= 10 ? 2 : 1;
   const remaining = weeks - taperLen - peakLen;
   // Split the remaining weeks ~55% base / 45% build.
@@ -651,7 +691,7 @@ const RAMP = {
   // cap is lower rather than stacking with the multi-sport discount.
   maxRampNewRider: 0.05,
   recoveryMultiplier: 0.55, // deload week = ~55% of the week before
-  taperMultiplier: 0.5,     // taper weeks shed volume
+  taperFinalShare: 0.25,    // race week lands at ~25% of the last loading week
   peakMultiplier: 0.85,     // peak eases volume vs late build
 };
 
@@ -687,9 +727,15 @@ export function weeklyLoadTargets({ startWeeklyTss, phaseByWeek, recoveryFlags, 
     if (baselinePending) { lastLoadingLoad = rampBaseline; baselinePending = false; }
     let target;
     if (phase === 'taper') {
-      // Progressive taper: each taper week sheds more volume.
-      const taperIndexFromEnd = phaseByWeek.slice(i).filter(p => p === 'taper').length; // 2,1
-      target = lastLoadingLoad * Math.pow(RAMP.taperMultiplier, (3 - taperIndexFromEnd));
+      // Progressive taper, generalised to any taper length: race week always
+      // lands at ~25% of the last loading week, and earlier taper weeks step
+      // down evenly toward it on a log scale. For 1- and 2-week tapers this
+      // reproduces the previous fixed shape exactly (0.25 / 0.5->0.25); a
+      // 3-week taper becomes 0.63 -> 0.40 -> 0.25.
+      const taperTotal = phaseByWeek.filter(p => p === 'taper').length;
+      const taperIndexFromEnd = phaseByWeek.slice(i).filter(p => p === 'taper').length; // taperTotal..1
+      const k = taperTotal - taperIndexFromEnd + 1; // 1..taperTotal
+      target = lastLoadingLoad * Math.pow(RAMP.taperFinalShare, k / Math.max(1, taperTotal));
     } else if (recoveryFlags[i]) {
       target = lastLoadingLoad * RAMP.recoveryMultiplier;
     } else if (phase === 'peak') {
@@ -1435,7 +1481,7 @@ export function generatePlan({
   goalKey, totalWeeks, daysPerWeek, weeklyHours,
   currentFtp, recentWeeklyTss, multiSport, library, weightedDayIndex = null,
   trainingAge = null, riderAgeBand = null, continuesAfter = null, continuationHint = null,
-  progressionLevels: progLevels = null,
+  progressionLevels: progLevels = null, scheduleTestWeek1 = false,
 }) {
   const goal = GOALS[goalKey] || GOALS['general-fitness'];
   const hasEvent = goal.hasEvent;
@@ -1467,7 +1513,7 @@ export function generatePlan({
     }
   }
 
-  const phaseByWeek = planPhases(totalWeeks, hasEvent);
+  const phaseByWeek = planPhases(totalWeeks, hasEvent, goalKey, riderAgeBand);
   // Multi-sport riders deload every 3 weeks; solo riders every 4. 55+ gets
   // one week knocked off whatever cadence applies — same light-touch nudge
   // as the hard-day trim above, not a hard rule.
@@ -1567,6 +1613,25 @@ export function generatePlan({
     };
   });
 
+  // Stage 4 onboarding: when the rider's FTP is only an estimate, week 1
+  // opens with a real ramp test in place of its hardest session, so the
+  // whole plan is riding on a measured number by the end of the first week.
+  if (scheduleTestWeek1 && weeks.length) {
+    const testWorkout = library.find(w => w.id === 'ramp-ftp-test');
+    if (testWorkout) {
+      const w1 = weeks[0];
+      const idx = Math.max(0, keySessionIndex(w1.days));
+      const nativeSeconds = testWorkout.intervals.reduce((a, b) => a + b.duration, 0);
+      const nativeTss = estimateWorkoutTss(testWorkout.intervals);
+      w1.days[idx] = { purpose: 'test', workoutId: testWorkout.id, name: testWorkout.name, nativeSeconds, nativeTss, fixedLength: true, plannedSeconds: nativeSeconds, plannedTss: nativeTss, isTestDay: true };
+      // The test can run longer than the session it replaced — trim the
+      // week's flexible rides so the time budget still holds.
+      enforceTimeBudget(w1.days, weeklySecondsBudget);
+      w1.plannedTss = w1.days.reduce((a, d) => a + d.plannedTss, 0);
+      w1.plannedSeconds = w1.days.reduce((a, d) => a + d.plannedSeconds, 0);
+    }
+  }
+
   return {
     goalKey,
     goalLabel: goal.label,
@@ -1586,6 +1651,7 @@ export function generatePlan({
     // changes) keep picking with the same difficulty preference. Older
     // plans without this field simply skip the factor.
     progressionLevels: progLevels,
+    ftpWasEstimated: !!scheduleTestWeek1,
     // Only stored so a *future* plan can read it back via
     // planContinuationHint — this plan's own generation doesn't use it.
     continuesAfter,
@@ -2371,4 +2437,84 @@ export function weekReviewSummary(plan, workoutHistory, weekNumber) {
     isRecovery: !!w.isRecovery,
     checkinAnswered: !!w.checkin,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 14. Vacation / pause handling (Stage 4)
+// ---------------------------------------------------------------------------
+// "I'm away for N days." The break starts from the rider's NEXT plan week
+// (the current week carries on as-is — they may already have ridden some of
+// it). Whole away-weeks are inserted as empty, recovery-flagged weeks; the
+// remaining plan shifts later by the same amount; and the weeks after the
+// return re-ramp from a decayed baseline rather than pretending fitness
+// held still through the break. Everything stays inside the ramp caps by
+// construction, and the change writes itself into the adaptation log.
+//
+// Note for event plans: the plan's end date moves later by the length of
+// the break. If the event date is fixed, the honest move is a fresh plan
+// with the real weeks remaining — the UI says so before applying.
+// ---------------------------------------------------------------------------
+const VACATION_DECAY_PER_WEEK = 0.94; // detraining is real but gentle over 1-3 weeks
+const VACATION_DECAY_FLOOR = 0.72;
+
+export function applyVacation(plan, awayDays, library, now = new Date()) {
+  if (!plan || !plan.weeks || !awayDays || awayDays < 1) return plan;
+  const K = Math.max(1, Math.min(4, Math.ceil(awayDays / 7)));
+  const cur = currentPlanWeek(plan, now);
+  if (cur >= plan.weeks.length) return plan; // nothing left to shift
+
+  const before = plan.weeks.filter(w => w.weekNumber <= cur);
+  const after = plan.weeks.filter(w => w.weekNumber > cur);
+  if (!after.length) return plan;
+
+  // The away weeks take the calendar slots the next weeks would have had;
+  // they borrow the displaced week's phase purely for display.
+  const vacationWeeks = Array.from({ length: K }, (_, i) => ({
+    weekNumber: cur + 1 + i,
+    phase: after[0].phase,
+    isRecovery: true,
+    isVacation: true,
+    targetTss: 0,
+    plannedTss: 0,
+    plannedSeconds: 0,
+    days: [],
+  }));
+  const shifted = after.map(w => ({ ...w, weekNumber: w.weekNumber + K }));
+  const weeks = [...before, ...vacationWeeks, ...shifted];
+
+  // Re-ramp the post-break weeks from a decayed baseline.
+  let lastLoading = plan.startWeeklyTss;
+  for (const w of before) {
+    if (!w.isRecovery && w.phase !== 'taper') lastLoading = w.targetTss;
+  }
+  const decay = Math.max(VACATION_DECAY_FLOOR, Math.pow(VACATION_DECAY_PER_WEEK, K));
+  const maxRamp = plan.multiSport ? RAMP.maxRampMulti : RAMP.maxRampSolo;
+  const rampBaseline = Math.max(74, Math.round((lastLoading * decay) / (1 + maxRamp)));
+  const firstBackWeek = cur + K + 1;
+  const targets = weeklyLoadTargets({
+    startWeeklyTss: rampBaseline,
+    phaseByWeek: weeks.map(w => w.phase),
+    recoveryFlags: weeks.map(w => w.isRecovery),
+    multiSport: plan.multiSport,
+    lockedTargets: weeks.map(w => (w.weekNumber < firstBackWeek ? w.targetTss : null)),
+    rampBaseline,
+  });
+  const retargeted = weeks.map((w, i) => (w.weekNumber < firstBackWeek ? w : { ...w, targetTss: targets[i] }));
+
+  const adaptationLog = [...(plan.adaptationLog || []), {
+    at: new Date().toISOString(),
+    id: `vacation-w${cur + 1}-${K}`,
+    kind: 'vacation',
+    reason: `${K} week${K > 1 ? 's' : ''} away from week ${cur + 1} — the plan shifts later by the same amount, and the first weeks back ease in about ${Math.round((1 - decay) * 100)}% lighter so fitness can catch back up.`,
+  }];
+
+  const updated = {
+    ...plan,
+    weeks: retargeted,
+    totalWeeks: retargeted.length,
+    adaptationLog,
+    // A review of an away week would be noise; skip straight past them.
+    lastReviewedWeek: Math.max(plan.lastReviewedWeek || 0, cur + K),
+  };
+  return rebuildWeekWorkouts(updated, library, firstBackWeek);
 }

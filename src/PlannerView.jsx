@@ -5,6 +5,7 @@ import {
   generatePlan, validatePlan, swapOptionsForPurpose, swapDayWorkout, applyCheckin,
   progressionLevels, planHealth, planProposals, applyPlanProposal, dismissPlanProposal,
   weeklyReviewDue, markReviewDone, weekReviewSummary,
+  applyVacation, estimateFtpFromProfile, FTP_SELF_ASSESSMENTS,
   estimateWorkoutTss, estimateOutdoorTss, currentPlanWeek, isPlanComplete, changePlanDaysPerWeek,
   planContinuationHint,
   WEEKDAY_LABELS, WEEKDAY_LABELS_FULL, defaultWeekdayPattern, setWeekdayPattern,
@@ -86,7 +87,13 @@ const CHECKIN_LABELS = {
 // 3-4 visible questions — FTP and starting fitness come from the rider's own
 // history, passed in as props, not asked here.
 // ---------------------------------------------------------------------------
-function PlannerSetup({ ftp, recentWeeklyTss, archivedPlans, onGenerate }) {
+function PlannerSetup({ ftp, recentWeeklyTss, archivedPlans, hasFtpTest, onSetFtp, onGenerate }) {
+  // Stage 4 onboarding: a humble FTP estimate for riders who've never tested.
+  const [showEstimate, setShowEstimate] = useState(false);
+  const [estWeight, setEstWeight] = useState('');
+  const [estAssess, setEstAssess] = useState(null);
+  const [estimateUsed, setEstimateUsed] = useState(false);
+  const estimatedFtp = estimateFtpFromProfile(estWeight, estAssess);
   const [goalKey, setGoalKey] = useState('general-fitness');
   const [weeks, setWeeks] = useState(8);
   const [days, setDays] = useState(4);
@@ -246,9 +253,50 @@ function PlannerSetup({ ftp, recentWeeklyTss, archivedPlans, onGenerate }) {
         {continuationHint && continuationHint.suggestEasedStart && (
           <> {continuationHint.weeksSince <= 3 ? "You just came off a peak/taper, so" : `It's been about ${continuationHint.weeksSince} weeks since your last plan, so`} this one starts a bit easier and ramps back up from there.</>
         )}
+        {!hasFtpTest && !estimateUsed && (
+          <>
+            {' '}That number hasn't come from a test yet.{' '}
+            <button onClick={() => setShowEstimate(v => !v)}
+              style={{ fontFamily: FONT_BODY, background: 'none', border: 'none', padding: 0, color: TEXT, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', textDecoration: 'underline' }}>
+              Estimate a starting point
+            </button>
+          </>
+        )}
+        {estimateUsed && (
+          <> Starting from an <b style={{ color: TEXT }}>estimated</b> FTP — week 1 opens with a ramp test to replace it with a real number.</>
+        )}
       </div>
 
-      <button onClick={() => onGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex: weightDay ? weightedDayIndex : null, trainingAge, riderAgeBand, continuesAfter, continuationHint })}
+      {!hasFtpTest && showEstimate && !estimateUsed && (
+        <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, marginBottom: 22 }}>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: TEXT, fontWeight: 700, marginBottom: 4 }}>Rough starting FTP</div>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, lineHeight: 1.5, marginBottom: 10 }}>
+            This is a deliberately conservative guess, not a measurement — it just gets your first week in the right ballpark. Your plan will open with a ramp test in week 1 to replace it with a real number.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: SUB }}>Your weight</span>
+            <input type="number" inputMode="numeric" value={estWeight} onChange={e => setEstWeight(e.target.value)} placeholder="70"
+              style={{ fontFamily: FONT_NUM, width: 72, padding: '8px 10px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 14 }} />
+            <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: SUB }}>kg</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+            {FTP_SELF_ASSESSMENTS.map(o => (
+              <button key={o.key} onClick={() => setEstAssess(o.key)}
+                style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '7px 12px', borderRadius: 8, cursor: 'pointer',
+                  border: `1px solid ${estAssess === o.key ? 'var(--accent)' : LINE}`, background: estAssess === o.key ? 'var(--accent)' : PANEL2,
+                  color: estAssess === o.key ? INK : TEXT, fontWeight: estAssess === o.key ? 700 : 500 }}>{o.label}</button>
+            ))}
+          </div>
+          {estimatedFtp != null && (
+            <button onClick={() => { onSetFtp && onSetFtp(estimatedFtp); setEstimateUsed(true); setShowEstimate(false); }}
+              style={{ fontFamily: FONT_BODY, background: 'var(--accent)', border: 'none', borderRadius: 9, padding: '9px 14px', color: INK, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              Use ~{estimatedFtp}W as my starting point
+            </button>
+          )}
+        </div>
+      )}
+
+      <button onClick={() => onGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex: weightDay ? weightedDayIndex : null, trainingAge, riderAgeBand, continuesAfter, continuationHint, scheduleTestWeek1: estimateUsed })}
         style={{ fontFamily: FONT_BODY, width: '100%', padding: '13px 0', borderRadius: 12, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         <CalendarDays size={18} /> Build my plan
       </button>
@@ -376,9 +424,11 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
             <span style={{ fontFamily: FONT_HEAD, fontSize: 16, fontWeight: 700, color: TEXT }}>Week {week.weekNumber}</span>
             <span style={{ fontFamily: FONT_BODY, fontSize: 10.5, color: phaseColor, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>{phaseInfo.label}</span>
             {isCurrent && <span style={{ fontFamily: FONT_BODY, fontSize: 10, color: INK, background: 'var(--accent)', borderRadius: 5, padding: '1px 6px', fontWeight: 700 }}>This week</span>}
-            {week.isRecovery && <span style={{ fontFamily: FONT_BODY, fontSize: 10, color: '#4A6FA5', border: '1px solid #4A6FA5', borderRadius: 5, padding: '1px 6px' }}>Recovery</span>}
+            {week.isVacation ? (
+              <span style={{ fontFamily: FONT_BODY, fontSize: 10, color: SUB, border: `1px solid ${LINE}`, borderRadius: 5, padding: '1px 6px' }}>Away</span>
+            ) : week.isRecovery && <span style={{ fontFamily: FONT_BODY, fontSize: 10, color: '#4A6FA5', border: '1px solid #4A6FA5', borderRadius: 5, padding: '1px 6px' }}>Recovery</span>}
           </div>
-          <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB }}>{week.days.length} sessions · {fmtLong(week.plannedSeconds)} · ~{week.plannedTss} TSS</div>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB }}>{week.isVacation ? 'Away — no sessions planned' : `${week.days.length} sessions · ${fmtLong(week.plannedSeconds)} · ~${week.plannedTss} TSS`}</div>
         </div>
         {open ? <ChevronUp size={18} color={SUB} /> : <ChevronDown size={18} color={SUB} />}
       </button>
@@ -397,7 +447,9 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
           {/* Weekly check-in — locked once answered so it can't be nudged by
               a stray tap later, but correctable via "Change" for a genuine
               misclick (applyCheckin cleanly undoes the previous answer's
-              effect before applying the new one, rather than stacking). */}
+              effect before applying the new one, rather than stacking).
+              Away weeks have nothing to check in about. */}
+          {!week.isVacation && (
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
             {week.checkin && !editingCheckin ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -436,6 +488,7 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
               </>
             )}
           </div>
+          )}
         </div>
       )}
     </div>
@@ -445,7 +498,7 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
 // ---------------------------------------------------------------------------
 // The main view. Holds the active plan; delegates onboarding to PlannerSetup.
 // ---------------------------------------------------------------------------
-export default function PlannerView({ plan, ftp, recentWeeklyTss, library, workoutHistory = [], ftpHistory = [], onSavePlan, onOpenPlanWorkout, archivedPlans = [], onArchivePlan, onDeleteArchivedPlan, onLogOutdoor }) {
+export default function PlannerView({ plan, ftp, recentWeeklyTss, library, workoutHistory = [], ftpHistory = [], onSavePlan, onOpenPlanWorkout, archivedPlans = [], onArchivePlan, onDeleteArchivedPlan, onLogOutdoor, onSetFtp }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dayEditor, setDayEditor] = useState(false);
   const [weekdayEditor, setWeekdayEditor] = useState(false);
@@ -472,7 +525,7 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan && plan.createdAt, currentWeek]);
 
-  function handleGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex, trainingAge, riderAgeBand, continuesAfter, continuationHint }) {
+  function handleGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex, trainingAge, riderAgeBand, continuesAfter, continuationHint, scheduleTestWeek1 = false }) {
     // Stage 1.3: the rider's demonstrated per-purpose level, computed fresh
     // from recent ride history and post-ride survey answers. With no history
     // it falls back to conservative defaults by training age, so this is
@@ -482,7 +535,7 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
       goalKey, totalWeeks: weeks, daysPerWeek: days, weeklyHours: hours,
       currentFtp: ftp, recentWeeklyTss, multiSport, library, weightedDayIndex,
       trainingAge, riderAgeBand, continuesAfter, continuationHint,
-      progressionLevels: levels,
+      progressionLevels: levels, scheduleTestWeek1,
     });
     onSavePlan(p);
   }
@@ -507,6 +560,21 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
   );
   const [reviewMissedReason, setReviewMissedReason] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
+  const [showHealthDetail, setShowHealthDetail] = useState(false);
+  const [vacationEditor, setVacationEditor] = useState(false);
+  // Per-completed-week compliance, for the health detail view (last 8 weeks).
+  const weeklyCompliance = useMemo(() => {
+    if (!plan) return [];
+    return plan.weeks
+      .filter(w => w.weekNumber < currentWeek && !w.isVacation)
+      .slice(-8)
+      .map(w => weekReviewSummary(plan, workoutHistory, w.weekNumber))
+      .filter(Boolean);
+  }, [plan, workoutHistory, currentWeek]);
+  function handleVacation(days) {
+    onSavePlan(applyVacation(plan, days, library));
+    setVacationEditor(false);
+  }
   function closeReview() { onSavePlan(markReviewDone(plan)); }
 
   function handleSwap(weekNumber, dayIndex, newWorkoutId) {
@@ -530,7 +598,7 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
   if (!plan) {
     return (
       <div>
-        <PlannerSetup ftp={ftp} recentWeeklyTss={recentWeeklyTss} archivedPlans={archivedPlans} onGenerate={handleGenerate} />
+        <PlannerSetup ftp={ftp} recentWeeklyTss={recentWeeklyTss} archivedPlans={archivedPlans} hasFtpTest={ftpHistory.length > 0} onSetFtp={onSetFtp} onGenerate={handleGenerate} />
         <ArchiveList plans={archivedPlans} onDelete={onDeleteArchivedPlan} />
       </div>
     );
@@ -612,17 +680,60 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
       {/* Plan health: one calm line comparing recent actual load to plan.
           Only appears once there's at least one completed week to judge. */}
       {health.status !== 'no-data' && !planComplete && (
-        <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: '11px 13px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 9, height: 9, borderRadius: 999, flexShrink: 0, background: health.status === 'on-track' ? 'var(--accent)' : health.status === 'running-hot' ? '#E2A93B' : '#C96A5B' }} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: TEXT, fontWeight: 700 }}>
-              {health.status === 'on-track' ? 'On track' : health.status === 'running-hot' ? 'Running hot' : 'Losing ground'}
+        <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, marginBottom: 12, overflow: 'hidden' }}>
+          <button onClick={() => setShowHealthDetail(v => !v)}
+            style={{ width: '100%', background: 'none', border: 'none', padding: '11px 13px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 9, height: 9, borderRadius: 999, flexShrink: 0, background: health.status === 'on-track' ? 'var(--accent)' : health.status === 'running-hot' ? '#E2A93B' : '#C96A5B' }} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: TEXT, fontWeight: 700 }}>
+                Plan health: {health.status === 'on-track' ? 'On track' : health.status === 'running-hot' ? 'Running hot' : 'Losing ground'}
+              </div>
+              <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, lineHeight: 1.45 }}>
+                {`You've ridden about ${Math.round(health.ratio * 100)}% of the planned load over the last ${health.weeksConsidered.length === 1 ? 'week' : `${health.weeksConsidered.length} weeks`}.`}
+                {health.status === 'on-track' ? ' Right where the plan wants you.' : health.status === 'running-hot' ? ' More than planned — keep an eye on recovery.' : ' Less than planned — the suggestions below can help the plan meet you where you are.'}
+              </div>
             </div>
-            <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, lineHeight: 1.45 }}>
-              {`You've ridden about ${Math.round(health.ratio * 100)}% of the planned load over the last ${health.weeksConsidered.length === 1 ? 'week' : `${health.weeksConsidered.length} weeks`}.`}
-              {health.status === 'on-track' ? ' Right where the plan wants you.' : health.status === 'running-hot' ? ' More than planned — keep an eye on recovery.' : ' Less than planned — the suggestions below can help the plan meet you where you are.'}
+            {showHealthDetail ? <ChevronUp size={16} color={SUB} /> : <ChevronDown size={16} color={SUB} />}
+          </button>
+          {showHealthDetail && (
+            <div style={{ padding: '0 13px 13px' }}>
+              {/* Fitness / fatigue / freshness, in plain language */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+                {[
+                  { label: 'Fitness', value: health.model.fitness, hint: 'Long-term load' },
+                  { label: 'Fatigue', value: health.model.fatigue, hint: 'Recent load' },
+                  { label: 'Freshness', value: health.model.freshness, hint: health.model.freshness >= 0 ? 'Ready to work' : 'Carrying fatigue' },
+                ].map((c, i) => (
+                  <div key={i} style={{ background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 10px' }}>
+                    <div style={{ fontFamily: FONT_BODY, fontSize: 9.5, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>{c.label}</div>
+                    <div style={{ fontFamily: FONT_NUM, fontSize: 16, fontWeight: 700, color: TEXT, margin: '2px 0' }}>{c.value}</div>
+                    <div style={{ fontFamily: FONT_BODY, fontSize: 10, color: SUB }}>{c.hint}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Week-by-week compliance bars */}
+              {weeklyCompliance.length > 0 && (
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 6 }}>Week by week</div>
+                  {weeklyCompliance.map(wc => {
+                    const pct = wc.complianceRatio != null ? Math.round(wc.complianceRatio * 100) : 0;
+                    return (
+                      <div key={wc.weekNumber} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                        <span style={{ fontFamily: FONT_BODY, fontSize: 10.5, color: SUB, width: 30, flexShrink: 0 }}>W{wc.weekNumber}</span>
+                        <div style={{ flex: 1, height: 7, borderRadius: 999, background: PANEL2, overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', borderRadius: 999, background: pct >= 115 ? '#E2A93B' : pct >= 75 ? 'var(--accent)' : '#C96A5B' }} />
+                        </div>
+                        <span style={{ fontFamily: FONT_NUM, fontSize: 10.5, color: SUB, width: 38, textAlign: 'right', flexShrink: 0 }}>{pct}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{ fontFamily: FONT_BODY, fontSize: 10.5, color: SUB, lineHeight: 1.5 }}>
+                Every change this plan has made to itself is in “Plan changes” below the weeks — one sentence each, so you can always see what changed and why.
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -713,6 +824,38 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
           </div>
         )}
       </div>
+
+      {/* Going away: pauses the plan from next week and shifts everything
+          later, with an eased first week back. Life happens; the plan copes. */}
+      {!planComplete && (
+        <div style={{ marginBottom: 16 }}>
+          {!vacationEditor ? (
+            <button onClick={() => setVacationEditor(true)}
+              style={{ fontFamily: FONT_BODY, width: '100%', background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14, cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: FONT_BODY, fontSize: 13, color: TEXT }}>
+                <Sun size={14} color={SUB} /> Going away for a bit?
+              </span>
+              <span style={{ color: SUB, fontSize: 12 }}>Pause ›</span>
+            </button>
+          ) : (
+            <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 14 }}>
+              <div style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: TEXT, fontWeight: 600, marginBottom: 4 }}>Pause the plan</div>
+              <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 12, lineHeight: 1.5 }}>
+                Your break starts from next week. The rest of the plan shifts later by the same amount, and the first weeks back ease in a little lighter so fitness can catch back up.
+                {plan.hasEvent && <> <b style={{ color: TEXT }}>Heads up:</b> this plan ends on a fixed event — pausing moves the plan's end date later. If your event date can't move, it's more honest to start a fresh plan with the real weeks remaining.</>}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                {[[7, '1 week'], [14, '2 weeks'], [21, '3 weeks']].map(([d, label]) => (
+                  <button key={d} onClick={() => handleVacation(d)}
+                    style={{ fontFamily: FONT_BODY, padding: '9px 14px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontWeight: 500 }}>{label}</button>
+                ))}
+              </div>
+              <button onClick={() => setVacationEditor(false)}
+                style={{ fontFamily: FONT_BODY, background: 'none', border: 'none', color: SUB, fontSize: 12, cursor: 'pointer', padding: 0 }}>Cancel</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Assign each session to a day of the week */}
       <div style={{ marginBottom: 16 }}>

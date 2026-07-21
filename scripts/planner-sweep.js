@@ -19,7 +19,7 @@ import {
   generatePlan, validatePlan, isHighStress, WORKOUT_PURPOSE,
   workoutDifficulty, progressionLevels,
   planProposals, applyPlanProposal, planHealth, planWeekWindow, applyCheckin,
-  weeklyReviewDue, markReviewDone, weekReviewSummary,
+  weeklyReviewDue, markReviewDone, weekReviewSummary, applyVacation, estimateFtpFromProfile,
 } from '../src/planner.js';
 import { loadLibrary } from './extract-library.js';
 
@@ -65,8 +65,9 @@ function assertPlan(plan, input, tag) {
   const fail = msg => failures.push(`${msg}\n    at ${label}`);
 
   // --- Structural sanity ---
-  if (!plan.weeks || plan.weeks.length !== Math.max(4, input.totalWeeks)) {
-    fail(`Plan has ${plan.weeks ? plan.weeks.length : 0} weeks, expected ${input.totalWeeks}`);
+  const expectedWeeks = Math.max(4, input.totalWeeks) + (plan.weeks || []).filter(w => w.isVacation).length;
+  if (!plan.weeks || plan.weeks.length !== expectedWeeks) {
+    fail(`Plan has ${plan.weeks ? plan.weeks.length : 0} weeks, expected ${expectedWeeks}`);
     return;
   }
   if (plan.daysPerWeek > input.daysPerWeek) fail(`Effective days ${plan.daysPerWeek} exceeds requested ${input.daysPerWeek}`);
@@ -113,7 +114,9 @@ function assertPlan(plan, input, tag) {
 
     // Invariant 4: every slot is filled with a real, plannable workout.
     const expectedDays = plan.daysPerWeek;
-    if (w.isRecovery) {
+    if (w.isVacation) {
+      if (w.days.length !== 0) fail(`${wk}: vacation week has ${w.days.length} sessions`);
+    } else if (w.isRecovery) {
       if (w.days.length < 1 || w.days.length > expectedDays) fail(`${wk}: recovery week has ${w.days.length} sessions (expected 1..${expectedDays})`);
     } else if (w.days.length !== expectedDays) {
       fail(`${wk}: ${w.days.length} sessions, expected ${expectedDays}`);
@@ -125,7 +128,7 @@ function assertPlan(plan, input, tag) {
       // Invariant 5: purpose-tagged, never a test, never a pain workout.
       const purpose = WORKOUT_PURPOSE[d.workoutId];
       if (!purpose) fail(`${wk} day ${di + 1}: '${d.workoutId}' has no WORKOUT_PURPOSE entry`);
-      if (purpose === 'test') fail(`${wk} day ${di + 1}: FTP test scheduled as training`);
+      if (purpose === 'test' && !d.isTestDay) fail(`${wk} day ${di + 1}: FTP test scheduled as training`);
       if (workout.pain) fail(`${wk} day ${di + 1}: pain workout '${d.workoutId}' selected`);
       if (!(d.plannedSeconds > 0)) fail(`${wk} day ${di + 1}: plannedSeconds ${d.plannedSeconds}`);
       // Rotation bookkeeping.
@@ -398,6 +401,52 @@ console.log(`Stage 2 scenarios exercised: ${scenarioCount} applied adjustments a
     }
   }
   console.log('Stage 3 scenarios exercised: review timing, summaries, adaptation log.');
+}
+
+// ============================================================================
+// Stage 4 scenario suite: vacations, week-1 test, FTP estimates
+// ============================================================================
+{
+  let vacations = 0;
+  for (const input of scenarioCombos) {
+    const base = generatePlan({ ...input, library: LIBRARY, currentFtp: 200 });
+    for (const [elapsed, awayDays] of [[1, 7], [2, 14], [3, 21]]) {
+      const plan = agedPlan(base, elapsed);
+      const paused = applyVacation(plan, awayDays, LIBRARY);
+      const K = Math.ceil(awayDays / 7);
+      assertPlan(paused, input, `[scenario H vacation ${awayDays}d@w${elapsed + 1}]`);
+      if (paused.weeks.length !== base.weeks.length + K) failures.push(`Scenario H: plan not extended by ${K} weeks\n    at ${JSON.stringify(input)}`);
+      // First loading week back must sit below the last loading week before the break.
+      const cur = elapsed + 1;
+      let preBreak = null;
+      for (const w of paused.weeks) if (w.weekNumber <= cur && !w.isRecovery && w.phase !== 'taper') preBreak = w.targetTss;
+      const firstBack = paused.weeks.find(w => w.weekNumber > cur + K && !w.isRecovery && w.phase !== 'taper');
+      if (preBreak && firstBack && firstBack.targetTss >= preBreak) {
+        failures.push(`Scenario H: first week back ${firstBack.targetTss} not below pre-break ${preBreak}\n    at ${JSON.stringify(input)}`);
+      }
+      vacations++;
+    }
+  }
+
+  // Week-1 test scheduling: exactly one test day, in week 1, flagged.
+  for (const input of scenarioCombos.slice(0, 6)) {
+    const plan = generatePlan({ ...input, library: LIBRARY, currentFtp: 200, scheduleTestWeek1: true });
+    assertPlan(plan, input, '[scenario H test-week-1]');
+    const testDays = plan.weeks.flatMap(w => w.days).filter(d => d.isTestDay);
+    if (testDays.length !== 1 || !plan.weeks[0].days.some(d => d.isTestDay)) {
+      failures.push(`Scenario H: expected exactly one week-1 test day\n    at ${JSON.stringify(input)}`);
+    }
+  }
+
+  // FTP estimates: monotone in self-assessment, sane bounds, null on junk.
+  const e = k => estimateFtpFromProfile(75, k);
+  if (!(e('new-to-riding') < e('ride-casually') && e('ride-casually') < e('ride-often') && e('ride-often') < e('ride-strong'))) {
+    failures.push('Scenario H: FTP estimate not monotone across self-assessments');
+  }
+  if (estimateFtpFromProfile(10, 'ride-often') !== null || estimateFtpFromProfile(75, 'nope') !== null) {
+    failures.push('Scenario H: FTP estimate accepted junk input');
+  }
+  console.log(`Stage 4 scenarios exercised: ${vacations} vacations, week-1 tests, FTP estimate checks.`);
 }
 
 // --- Report ---
