@@ -916,7 +916,7 @@ export function maybeInjectPeriodicPurpose(purposeSlots, goal, phaseByWeek, reco
 // `sessionSecondsHint` (the rough seconds a single session has) are all
 // optional; when omitted the function still works and falls back to prior
 // behaviour.
-export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTerrainThisWeek, phase, recentByPurpose, sessionSecondsHint, recoveryMode) {
+export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTerrainThisWeek, phase, recentByPurpose, sessionSecondsHint, recoveryMode, progLevels) {
   let candidates = library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
   if (!candidates.length) {
     // Fallback chain so a slot is never empty.
@@ -934,6 +934,19 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
     if (!candidates.length) {
       return library.find(w => WORKOUT_PURPOSE[w.id] === 'endurance') || library[0];
     }
+  }
+
+  // Progression gate (Stage 1.3). Scoring nudges alone can't guarantee the
+  // "never far above the rider's level" rule — a rarely-used epic earns full
+  // terrain freshness and out-scores any gentle penalty eventually. So when
+  // the rider's level for this purpose is known, candidates sitting more
+  // than 2.4 difficulty points above it are excluded outright — but only if
+  // at least 3 suitable candidates remain, so small pools never starve and
+  // rotation always has room to cycle.
+  if (progLevels && progLevels[purpose] != null && candidates.length > 3) {
+    const maxDifficulty = progLevels[purpose] + 2.4;
+    const gated = candidates.filter(w => workoutDifficulty(w) <= maxDifficulty);
+    if (gated.length >= 3) candidates = gated;
   }
 
   // Score every candidate; higher is better. Ties fall back to library order,
@@ -1001,6 +1014,21 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
       const overMinutes = (native - comfortableSeconds) / 60;
       if (overMinutes > 0) s -= Math.min(45, overMinutes * 0.5);
     }
+    // (6) Progression fit (Stage 1.3). When the rider's demonstrated level
+    // for this purpose is known, prefer workouts whose computed difficulty
+    // sits just above it (progressive overload), and lean away from ones far
+    // above it. Deliberately SMALL weights: this nudges ties and near-ties,
+    // it never outmuscles rotation (±14) or terrain variety (±10/tag) — per
+    // the standing rule, a new factor enters gently and gets tuned with the
+    // harness watching.
+    if (progLevels && progLevels[purpose] != null) {
+      const level = progLevels[purpose];
+      const d = workoutDifficulty(w);
+      const target = level + 0.3; // "just above where you are"
+      const dist = Math.abs(d - target);
+      s += Math.max(0, 6 - dist * 4);           // up to +6 for a near-perfect fit
+      if (d > level + 1.5) s -= Math.min(10, (d - (level + 1.5)) * 4); // never far above
+    }
     return s;
   }
 
@@ -1038,6 +1066,156 @@ export function markRecentlyUsed(recentByPurpose, purpose, workoutId) {
 // library (this is what the swap UI shows). Excludes tests.
 export function swapOptionsForPurpose(purpose, library) {
   return library.filter(w => WORKOUT_PURPOSE[w.id] === purpose && WORKOUT_PURPOSE[w.id] !== 'test');
+}
+
+// ---------------------------------------------------------------------------
+// 6c. Workout difficulty — computed, never hand-tagged
+// ---------------------------------------------------------------------------
+// A single number for how hard a workout is, derived deterministically from
+// its planned intervals. Because it's computed, every future workout is
+// automatically rated the moment it's authored, and the whole scale can be
+// recalibrated by editing this one function.
+//
+// Ingredients (all from the interval data that already exists):
+//   - overall load: the workout's estimated TSS, in "threshold hours"
+//   - time at/above threshold (IF >= 0.95): the genuinely expensive minutes
+//   - the longest sustained hard block (contiguous intervals at IF >= 0.88,
+//     i.e. sweet spot and up): 3x10 is easier than 1x30 at the same load
+//   - average intensity: a short criterium hurts more than its TSS suggests
+//
+// The absolute number is unitless (roughly 0.5 for a recovery spin up to
+// ~7-8 for the biggest mountain epics); what matters is the ORDERING within
+// a purpose, which is what progression levels compare against.
+// ---------------------------------------------------------------------------
+function intervalIntensityFactor(it) {
+  if (it.type === 'power') return it.target / 100;
+  if (it.type === 'rpe') {
+    const table = { 1: 0.45, 2: 0.5, 3: 0.6, 4: 0.68, 5: 0.75, 6: 0.83, 7: 0.95, 8: 1.03, 9: 1.12, 10: 1.25 };
+    return table[Math.round(it.target)] || 0.6;
+  }
+  return 0.4; // free / rest
+}
+
+export function workoutDifficulty(workout) {
+  const intervals = workout && workout.intervals;
+  if (!intervals || !intervals.length) return 0;
+  const totalSeconds = intervals.reduce((a, b) => a + b.duration, 0) || 1;
+  const tss = estimateWorkoutTss(intervals);
+
+  let aboveThreshold = 0;
+  let longestHard = 0;
+  let runHard = 0;
+  for (const it of intervals) {
+    const f = intervalIntensityFactor(it);
+    if (f >= 0.95) aboveThreshold += it.duration;
+    if (f >= 0.88) { runHard += it.duration; if (runHard > longestHard) longestHard = runHard; }
+    else runHard = 0;
+  }
+  const avgIf = Math.sqrt(tss / ((totalSeconds / 3600) * 100));
+
+  return Math.round((
+    (tss / 100) * 1.0 +            // each "threshold hour" of load
+    (aboveThreshold / 1800) * 1.2 + // each 30min at/above threshold
+    (longestHard / 1500) * 0.8 +    // each 25min of sustained hard block
+    avgIf * 1.5                     // intensity of the ride as a whole
+  ) * 10) / 10;
+}
+
+// ---------------------------------------------------------------------------
+// 6d. Per-purpose progression level (Stage 1.3)
+// ---------------------------------------------------------------------------
+// A small number per purpose describing the difficulty this rider has
+// DEMONSTRATED they can handle for that kind of work, on the same scale as
+// workoutDifficulty. Deliberately computed fresh from workout history every
+// time rather than stored — no state to drift, nothing new to sync, and it
+// degrades to sensible defaults with no history at all.
+//
+// Rules (in plain English):
+//   - No data for a purpose → start from a conservative percentile of that
+//     purpose's pool, set by training age (new riders start lower).
+//   - Finished a session and rated it Easy/Moderate → you're ready for a
+//     notch above that workout's difficulty.
+//   - Finished and rated Hard/Very hard (or gave no rating) → you've
+//     demonstrated that difficulty; the level holds there, no promotion.
+//   - Couldn't finish, bailed early, or ended at a big negative intensity
+//     adjustment → the level steps back down.
+//
+// Only recent history counts (last RECENT_DAYS), oldest processed first so
+// the newest evidence has the final say.
+// ---------------------------------------------------------------------------
+const PROGRESSION = {
+  RECENT_DAYS: 70,          // ~10 weeks of evidence
+  MAX_SESSIONS: 8,          // per purpose; more adds noise, not signal
+  BIG_NEGATIVE_ADJUST: -8,  // ending a ride at -8% or lower reads as "too hard"
+  UP_STEP: 0.4,             // promotion above a comfortably-finished workout
+  DOWN_STEP: 0.5,           // demotion after a failed/over-hard session
+  DEFAULT_PERCENTILE: { new: 0.2, developing: 0.4, established: 0.55 },
+};
+
+function percentileOf(sorted, p) {
+  if (!sorted.length) return 0;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+  return sorted[idx];
+}
+
+export function progressionLevels(workoutHistory, library, trainingAge) {
+  const byId = new Map(library.map(w => [w.id, w]));
+  // Difficulty pool per purpose (sorted), for defaults and bounds.
+  const pools = {};
+  for (const w of library) {
+    const p = WORKOUT_PURPOSE[w.id];
+    if (!p || p === 'test' || w.pain) continue;
+    (pools[p] || (pools[p] = [])).push(workoutDifficulty(w));
+  }
+  for (const p of Object.keys(pools)) pools[p].sort((a, b) => a - b);
+
+  const defaultPct = PROGRESSION.DEFAULT_PERCENTILE[trainingAge] ?? PROGRESSION.DEFAULT_PERCENTILE.developing;
+  const levels = {};
+  for (const p of Object.keys(pools)) levels[p] = percentileOf(pools[p], defaultPct);
+
+  if (!workoutHistory || !workoutHistory.length) return levels;
+
+  const cutoff = Date.now() - PROGRESSION.RECENT_DAYS * 86400000;
+  // Oldest first, grouped per purpose, capped at the most recent MAX_SESSIONS.
+  const perPurpose = {};
+  for (const s of workoutHistory) {
+    if (!s.workoutId || s.outdoor) continue;
+    const w = byId.get(s.workoutId);
+    if (!w || w.pain) continue;
+    const purpose = WORKOUT_PURPOSE[s.workoutId];
+    if (!purpose || purpose === 'test') continue;
+    if (new Date(s.date).getTime() < cutoff) continue;
+    (perPurpose[purpose] || (perPurpose[purpose] = [])).push(s);
+  }
+
+  for (const [purpose, sessions] of Object.entries(perPurpose)) {
+    const recent = sessions.slice(-PROGRESSION.MAX_SESSIONS);
+    const pool = pools[purpose] || [0];
+    const floor = pool[0];
+    const ceil = pool[pool.length - 1];
+    // With real evidence, anchor the level in what the rider actually rode —
+    // not the pool-shaped default. Some pools (climbing especially) are
+    // dominated by long epics, so their percentile default sits far above
+    // anything a rider may have demonstrated; the moment there is history,
+    // demonstrated difficulty is the authority and the rules walk from there.
+    let level = workoutDifficulty(byId.get(recent[0].workoutId));
+    for (const s of recent) {
+      const d = workoutDifficulty(byId.get(s.workoutId));
+      const struggled = !s.completed
+        || s.effortRating === 5
+        || (s.intensityAdjust != null && s.intensityAdjust <= PROGRESSION.BIG_NEGATIVE_ADJUST);
+      if (struggled) {
+        level = Math.min(level, d) - PROGRESSION.DOWN_STEP;
+      } else if (s.effortRating != null && s.effortRating <= 2) {
+        level = Math.max(level, d + PROGRESSION.UP_STEP);
+      } else {
+        // Hard / Very hard / unrated but finished: demonstrated, no promotion.
+        level = Math.max(level, d);
+      }
+    }
+    levels[purpose] = Math.max(floor, Math.min(ceil, Math.round(level * 10) / 10));
+  }
+  return levels;
 }
 
 // A rider can ask for one session a week to be the big one (e.g. "8 hours a
@@ -1247,6 +1425,7 @@ export function generatePlan({
   goalKey, totalWeeks, daysPerWeek, weeklyHours,
   currentFtp, recentWeeklyTss, multiSport, library, weightedDayIndex = null,
   trainingAge = null, riderAgeBand = null, continuesAfter = null, continuationHint = null,
+  progressionLevels: progLevels = null,
 }) {
   const goal = GOALS[goalKey] || GOALS['general-fitness'];
   const hasEvent = goal.hasEvent;
@@ -1327,7 +1506,7 @@ export function generatePlan({
 
     // First pass: pick a workout per slot at its native length.
     const rawDays = purposeSlots.map(purpose => {
-      const w = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, phase, recentByPurpose, pickHint, isRecovery);
+      const w = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, phase, recentByPurpose, pickHint, isRecovery, progLevels);
       usedIds.add(w.id);
       markTerrainUsed(usedTerrain, w.id);
       markRecentlyUsed(recentByPurpose, purpose, w.id);
@@ -1392,6 +1571,11 @@ export function generatePlan({
     weekdayPattern: defaultWeekdayPattern(effectiveDays),
     createdAt: new Date().toISOString(),
     startWeeklyTss,
+    // The per-purpose progression levels this plan was generated against
+    // (Stage 1.3). Stored so mid-plan rebuilds (check-ins, day-count
+    // changes) keep picking with the same difficulty preference. Older
+    // plans without this field simply skip the factor.
+    progressionLevels: progLevels,
     // Only stored so a *future* plan can read it back via
     // planContinuationHint — this plan's own generation doesn't use it.
     continuesAfter,
@@ -1600,7 +1784,7 @@ export function rebuildWeekWorkouts(plan, library, fromWeek) {
     // their own (much lower) TSS target, not the plan-wide average.
     const pickHint = w.isRecovery ? (w.targetTss / Math.max(1, purposeSlots.length)) * 120 : sessionSecondsHint;
     const rawDays = purposeSlots.map(purpose => {
-      const wk = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, w.phase, recentByPurpose, pickHint, w.isRecovery);
+      const wk = pickWorkoutForPurpose(purpose, library, usedIds, usedTerrain, w.phase, recentByPurpose, pickHint, w.isRecovery, plan.progressionLevels || null);
       usedIds.add(wk.id);
       markTerrainUsed(usedTerrain, wk.id);
       markRecentlyUsed(recentByPurpose, purpose, wk.id);

@@ -17,6 +17,7 @@
 // ============================================================================
 import {
   generatePlan, validatePlan, isHighStress, WORKOUT_PURPOSE,
+  workoutDifficulty, progressionLevels,
 } from '../src/planner.js';
 import { loadLibrary } from './extract-library.js';
 
@@ -49,6 +50,7 @@ function checkPlan(input) {
     hours: input.weeklyHours, multi: input.multiSport, age: input.trainingAge,
     band: input.riderAgeBand, recentTss: input.recentWeeklyTss,
     weightedDay: input.weightedDayIndex ?? null,
+    prog: input.progressionLevels ? 'on' : 'off',
   });
   const fail = msg => failures.push(`${msg}\n    at ${label}`);
 
@@ -176,6 +178,37 @@ for (const goalKey of GOAL_KEYS)
     for (let weightedDayIndex = 0; weightedDayIndex < daysPerWeek; weightedDayIndex++)
       for (const weeklyHours of [3, 8, 12])
         checkPlan({ goalKey, totalWeeks: 8, daysPerWeek, weeklyHours, multiSport: false, trainingAge: null, riderAgeBand: null, recentWeeklyTss: 0, weightedDayIndex });
+
+// --- Progression-levels sweep (Stage 1.3 scoring factor active) ---
+// Build three synthetic riders: one at the bottom of every purpose's
+// difficulty range, one mid, one at the top — plus the real defaults each
+// training age produces with no history — and assert every invariant still
+// holds with the difficulty-fit factor switched on. The rotation invariant
+// is the important one here: it's what catches this factor ever starting to
+// dominate selection the way duration-fit once did.
+const diffPools = {};
+for (const w of LIBRARY) {
+  const p = WORKOUT_PURPOSE[w.id];
+  if (!p || p === 'test' || w.pain) continue;
+  (diffPools[p] || (diffPools[p] = [])).push(workoutDifficulty(w));
+}
+const syntheticLevelSets = [0, 0.5, 1].map(frac => {
+  const levels = {};
+  for (const [p, ds] of Object.entries(diffPools)) {
+    const lo = Math.min(...ds), hi = Math.max(...ds);
+    levels[p] = Math.round((lo + (hi - lo) * frac) * 10) / 10;
+  }
+  return levels;
+});
+for (const age of ['new', 'developing', 'established']) {
+  syntheticLevelSets.push(progressionLevels([], LIBRARY, age));
+}
+for (const levels of syntheticLevelSets)
+  for (const goalKey of GOAL_KEYS)
+    for (const daysPerWeek of [3, 4, 6])
+      for (const weeklyHours of [3, 6, 12])
+        for (const totalWeeks of [8, 16])
+          checkPlan({ goalKey, totalWeeks, daysPerWeek, weeklyHours, multiSport: false, trainingAge: null, riderAgeBand: null, recentWeeklyTss: 0, progressionLevels: levels });
 
 // --- Report ---
 if (failures.length) {

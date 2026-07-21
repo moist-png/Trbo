@@ -3,6 +3,7 @@ import { CalendarDays, ChevronRight, ChevronDown, ChevronUp, Play, RefreshCw, Tr
 import {
   GOALS, PHASE, PURPOSE_LABEL, WORKOUT_PURPOSE,
   generatePlan, validatePlan, swapOptionsForPurpose, swapDayWorkout, applyCheckin,
+  progressionLevels,
   estimateWorkoutTss, estimateOutdoorTss, currentPlanWeek, isPlanComplete, changePlanDaysPerWeek,
   planContinuationHint,
   WEEKDAY_LABELS, WEEKDAY_LABELS_FULL, defaultWeekdayPattern, setWeekdayPattern,
@@ -443,7 +444,7 @@ function WeekCard({ week, library, weekdayPattern, defaultOpen, isCurrent, cardR
 // ---------------------------------------------------------------------------
 // The main view. Holds the active plan; delegates onboarding to PlannerSetup.
 // ---------------------------------------------------------------------------
-export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSavePlan, onOpenPlanWorkout, archivedPlans = [], onArchivePlan, onDeleteArchivedPlan, onLogOutdoor }) {
+export default function PlannerView({ plan, ftp, recentWeeklyTss, library, workoutHistory = [], onSavePlan, onOpenPlanWorkout, archivedPlans = [], onArchivePlan, onDeleteArchivedPlan, onLogOutdoor }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dayEditor, setDayEditor] = useState(false);
   const [weekdayEditor, setWeekdayEditor] = useState(false);
@@ -471,10 +472,16 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, onSav
   }, [plan && plan.createdAt, currentWeek]);
 
   function handleGenerate({ goalKey, weeks, days, hours, multiSport, weightedDayIndex, trainingAge, riderAgeBand, continuesAfter, continuationHint }) {
+    // Stage 1.3: the rider's demonstrated per-purpose level, computed fresh
+    // from recent ride history and post-ride survey answers. With no history
+    // it falls back to conservative defaults by training age, so this is
+    // always safe to pass.
+    const levels = progressionLevels(workoutHistory, library, trainingAge);
     const p = generatePlan({
       goalKey, totalWeeks: weeks, daysPerWeek: days, weeklyHours: hours,
       currentFtp: ftp, recentWeeklyTss, multiSport, library, weightedDayIndex,
       trainingAge, riderAgeBand, continuesAfter, continuationHint,
+      progressionLevels: levels,
     });
     onSavePlan(p);
   }
