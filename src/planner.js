@@ -932,9 +932,11 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
     // (1) Strongly avoid repeating an exact workout this week.
     if (usedIdsThisWeek && usedIdsThisWeek.has(w.id)) s -= 100;
     // (2) Reward terrain the week hasn't used yet — one point per fresh tag.
+    // (Applied below, after the rotation check, because a recently-used
+    // workout only earns half credit for its freshness — see rule 4.)
     const terrain = WORKOUT_TERRAIN[w.id] || [];
     const freshTags = terrain.filter(t => !usedTerrain.has(t)).length;
-    s += freshTags * 10;
+    let freshBonus = freshTags * 10;
     // (3) Past base phase, nudge toward the real-world Rides over Basics.
     if (pastBase && w.category === 'Rides') s += 3;
     // (4) Cross-week rotation: penalise recently-used workouts, most-recent
@@ -942,13 +944,25 @@ export function pickWorkoutForPurpose(purpose, library, usedIdsThisWeek, usedTer
     // pick (penalty ~14) can overcome a single fresh-terrain tag (+10) — that's
     // what lets a small pool actually rotate instead of the one richest-tagged
     // workout winning every week forever (e.g. anaerobic, where Sprint Ladder
-    // was otherwise unreachable behind Lead-Out Day). It stays below TWO fresh
-    // tags (+20), so genuine within-week terrain variety still wins.
+    // was otherwise unreachable behind Lead-Out Day). A flat penalty alone
+    // isn't enough, though: a workout carrying two RARE tags (+20, e.g. the
+    // only steep/hairpins ride that fits a small time budget) out-earns the
+    // −14 every week and still dominates. So while a workout sits in the
+    // recent window it earns NO terrain-freshness credit at all — the rider
+    // just saw it, so "novel terrain" is not a real argument for bringing it
+    // straight back. Recently-used candidates then compete purely on the
+    // decaying recency penalty, which turns a small pool (e.g. the three
+    // short climbs that fit a tight time budget) into a clean round-robin.
+    // Within-week variety is unaffected: freshness fully counts for anything
+    // not recently used, and exact same-week repeats are still blocked by
+    // rule 1.
     const recIdx = recent.indexOf(w.id);
     if (recIdx >= 0) {
       const recency = recent.length - recIdx; // 1 = most recently used
       s -= Math.max(0, 14 - (recency - 1) * 3);
+      freshBonus = 0;
     }
+    s += freshBonus;
     // (5) Duration fit for fixed-length quality sessions. Penalise workouts that
     // run past the comfortable session length (they'd be compressed) — half a
     // point per minute over, capped so it can override terrain/rotation and pull
