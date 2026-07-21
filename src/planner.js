@@ -204,6 +204,21 @@ export const WORKOUT_PURPOSE = {
   'ride-anvil-work': 'threshold',
   'ride-the-grind': 'threshold',
   'ride-midweek-crit': 'race',
+  // --- Coverage batch: short quality sessions (3 each for the four purposes
+  // the Stage 0 audit flagged as thin at small session budgets; climbing
+  // also gets its first rides between ~50min and the 2.5h epics) ---
+  'ride-castle-hill': 'climbing',
+  'ride-two-cols-loop': 'climbing',
+  'ride-monastery-road': 'climbing',
+  'ride-quayside-tt': 'threshold',
+  'ride-lighthouse-run': 'threshold',
+  'ride-viaduct-repeats': 'threshold',
+  'ride-rooftop-repeats': 'vo2max',
+  'ride-seawall-surges': 'vo2max',
+  'ride-gorge-attacks': 'vo2max',
+  'ride-station-sprints': 'anaerobic',
+  'ride-green-lights': 'anaerobic',
+  'ride-final-two-hundred': 'anaerobic',
 };
 
 // Human-readable labels for each purpose (used in the UI on day rows).
@@ -411,6 +426,19 @@ export const WORKOUT_TERRAIN = {
   'ride-anvil-work': ['mixed'],
   'ride-the-grind': ['mixed'],
   'ride-midweek-crit': ['criterium', 'paceline'],
+  // --- Coverage batch: short quality sessions ---
+  'ride-castle-hill': ['steep', 'urban'],
+  'ride-two-cols-loop': ['sustained-climb', 'multi-climb'],
+  'ride-monastery-road': ['sustained-climb', 'hairpins', 'scenic'],
+  'ride-quayside-tt': ['flat', 'urban'],
+  'ride-lighthouse-run': ['flat', 'windy', 'scenic'],
+  'ride-viaduct-repeats': ['rolling', 'urban'],
+  'ride-rooftop-repeats': ['urban', 'punchy'],
+  'ride-seawall-surges': ['flat', 'windy'],
+  'ride-gorge-attacks': ['punchy', 'scenic'],
+  'ride-station-sprints': ['urban', 'flat'],
+  'ride-green-lights': ['urban', 'punchy'],
+  'ride-final-two-hundred': ['flat', 'paceline'],
 };
 
 // Human-readable labels for each terrain tag (for any UI that surfaces them).
