@@ -19,6 +19,7 @@ import {
   generatePlan, validatePlan, isHighStress, WORKOUT_PURPOSE,
   workoutDifficulty, progressionLevels,
   planProposals, applyPlanProposal, planHealth, planWeekWindow, applyCheckin,
+  weeklyReviewDue, markReviewDone, weekReviewSummary,
 } from '../src/planner.js';
 import { loadLibrary } from './extract-library.js';
 
@@ -355,6 +356,49 @@ for (const input of scenarioCombos) {
   }
 }
 console.log(`Stage 2 scenarios exercised: ${scenarioCount} applied adjustments across ${scenarioCombos.length} plan shapes.`);
+
+// ============================================================================
+// Stage 3 scenario suite: the weekly review
+// ============================================================================
+{
+  const input = scenarioCombos[0];
+  const base = generatePlan({ ...input, library: LIBRARY, currentFtp: 200 });
+
+  // Review timing: not due in week 1; due (for week N-1) once week N starts;
+  // silent after being closed; never due once the plan is complete.
+  const w1 = agedPlan(base, 0);
+  if (weeklyReviewDue(w1) !== null) failures.push('Scenario G: review due during week 1');
+  const w3 = agedPlan(base, 2);
+  if (weeklyReviewDue(w3) !== 2) failures.push(`Scenario G: expected review of week 2, got ${weeklyReviewDue(w3)}`);
+  const closed = markReviewDone(w3);
+  if (weeklyReviewDue(closed) !== null) failures.push('Scenario G: review still due after being closed');
+  const done = agedPlan(base, base.weeks.length + 1);
+  if (weeklyReviewDue(done) !== null) failures.push('Scenario G: review due on a completed plan');
+
+  // Review summary: full compliance reads as full compliance.
+  const hist = historyFor(w3, [1, 2], { share: 1 });
+  const sum = weekReviewSummary(w3, hist, 2);
+  if (!sum || sum.ridden !== sum.total || sum.complianceRatio < 0.95) {
+    failures.push(`Scenario G: full-compliance summary wrong: ${JSON.stringify(sum)}`);
+  }
+
+  // Adaptation log: every check-in answer writes a plain-English entry, and
+  // applied proposals do too.
+  const checked = applyCheckin(w3, 2, 'too-hard', LIBRARY);
+  if (!(checked.adaptationLog || []).some(e => e.kind === 'checkin' && /too hard/.test(e.reason))) {
+    failures.push('Scenario G: too-hard check-in missing from adaptation log');
+  }
+  const missPlan = agedPlan(base, 3);
+  const missHist = historyFor(missPlan, [1, 2], { share: 1 });
+  const reentry = planProposals({ plan: missPlan, workoutHistory: missHist, ftpHistory: [], library: LIBRARY }).find(p => p.kind === 'reentry');
+  if (reentry) {
+    const applied = applyPlanProposal(missPlan, reentry, LIBRARY);
+    if (!(applied.adaptationLog || []).some(e => e.id === reentry.id)) {
+      failures.push('Scenario G: applied reentry missing from adaptation log');
+    }
+  }
+  console.log('Stage 3 scenarios exercised: review timing, summaries, adaptation log.');
+}
 
 // --- Report ---
 if (failures.length) {

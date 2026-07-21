@@ -1761,7 +1761,21 @@ export function applyCheckin(plan, weekNumber, feedback, library, reason) {
     return { ...w, targetTss: targets[i], isRecovery: recoveryFlags[i], insertedRecovery: recoveryFlags[i] && !basePlan.weeks[i].isRecovery };
   });
 
-  const adjusted = { ...plan, weeks };
+  // Record what this answer did to the plan, in plain English, so the
+  // adaptation log tells the whole story of the block (Stage 3).
+  const checkinReasonText = {
+    'too-easy': `You said week ${weekNumber} was too easy — the coming weeks now ramp up as fast as the safety cap allows.`,
+    'about-right': `You said week ${weekNumber} was about right — the plan carries on unchanged.`,
+    'too-hard': `You said week ${weekNumber} was too hard — next week becomes a recovery week and the remaining load eases back ~15%.`,
+    'missed-a-lot': missedScheduleOnly
+      ? `You missed most of week ${weekNumber} to scheduling — the remaining load eases back gently, no forced recovery week.`
+      : `You missed most of week ${weekNumber} through fatigue — next week becomes a recovery week and the remaining load drops ~30%.`,
+  }[feedback] || `Week ${weekNumber} check-in applied.`;
+  const adaptationLog = [...(plan.adaptationLog || []), {
+    at: new Date().toISOString(), id: `checkin-w${weekNumber}-${feedback}`, kind: 'checkin', reason: checkinReasonText,
+  }];
+
+  const adjusted = { ...plan, weeks, adaptationLog };
   return rebuildWeekWorkouts(adjusted, library, weekNumber + 1);
 }
 
@@ -2309,4 +2323,52 @@ export function applyPlanProposal(plan, proposal, library) {
 export function dismissPlanProposal(plan, proposal) {
   if (!plan || !proposal) return plan;
   return { ...plan, dismissedProposals: [...(plan.dismissedProposals || []), proposal.id] };
+}
+
+// ---------------------------------------------------------------------------
+// 13. Weekly plan review (Stage 3)
+// ---------------------------------------------------------------------------
+// Once a week — when a new plan week has started — the app presents ONE
+// review moment: how last week actually went, the check-in question if it
+// hasn't been answered, and whatever proposals the Stage 2 rules produced
+// (already capped, already dismissal-aware). These helpers keep the "when"
+// and the "what happened" logic out of the UI so they're testable.
+// ---------------------------------------------------------------------------
+
+// The week number to review right now, or null. A review is due when at
+// least one full plan week has finished since the last review was closed.
+// Reviews always look at the most recently FINISHED week.
+export function weeklyReviewDue(plan, now = new Date()) {
+  if (!plan || !plan.weeks || !plan.createdAt) return null;
+  const cur = currentPlanWeek(plan, now);
+  if (cur < 2) return null;
+  if (isPlanComplete(plan, now)) return null;
+  const lastReviewed = plan.lastReviewedWeek || 0;
+  if (lastReviewed >= cur) return null;
+  return cur - 1;
+}
+
+export function markReviewDone(plan, now = new Date()) {
+  return { ...plan, lastReviewedWeek: currentPlanWeek(plan, now) };
+}
+
+// Everything the review card needs to say about the finished week, in data
+// form: sessions ridden vs planned, and actual vs scheduled load.
+export function weekReviewSummary(plan, workoutHistory, weekNumber) {
+  const w = plan.weeks.find(x => x.weekNumber === weekNumber);
+  if (!w) return null;
+  const total = (w.days || []).length;
+  const ridden = (w.days || []).filter(d => dayWasRidden(plan, workoutHistory, weekNumber, d)).length;
+  const actual = actualWeeklyTss(plan, workoutHistory, weekNumber);
+  const planned = w.plannedTss || w.targetTss || 0;
+  return {
+    weekNumber,
+    ridden,
+    total,
+    actualTss: actual,
+    plannedTss: planned,
+    complianceRatio: planned > 0 ? Math.round((actual / planned) * 100) / 100 : null,
+    isRecovery: !!w.isRecovery,
+    checkinAnswered: !!w.checkin,
+  };
 }

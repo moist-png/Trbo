@@ -4,6 +4,7 @@ import {
   GOALS, PHASE, PURPOSE_LABEL, WORKOUT_PURPOSE,
   generatePlan, validatePlan, swapOptionsForPurpose, swapDayWorkout, applyCheckin,
   progressionLevels, planHealth, planProposals, applyPlanProposal, dismissPlanProposal,
+  weeklyReviewDue, markReviewDone, weekReviewSummary,
   estimateWorkoutTss, estimateOutdoorTss, currentPlanWeek, isPlanComplete, changePlanDaysPerWeek,
   planContinuationHint,
   WEEKDAY_LABELS, WEEKDAY_LABELS_FULL, defaultWeekdayPattern, setWeekdayPattern,
@@ -497,6 +498,17 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
   function handleApplyProposal(p) { onSavePlan(applyPlanProposal(plan, p, library)); }
   function handleDismissProposal(p) { onSavePlan(dismissPlanProposal(plan, p)); }
 
+  // Stage 3: the weekly review. Due once per new plan week; reviews the week
+  // that just finished. Closing it stamps lastReviewedWeek on the plan.
+  const reviewWeek = plan ? weeklyReviewDue(plan) : null;
+  const reviewSummary = useMemo(
+    () => (plan && reviewWeek ? weekReviewSummary(plan, workoutHistory, reviewWeek) : null),
+    [plan, reviewWeek, workoutHistory]
+  );
+  const [reviewMissedReason, setReviewMissedReason] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
+  function closeReview() { onSavePlan(markReviewDone(plan)); }
+
   function handleSwap(weekNumber, dayIndex, newWorkoutId) {
     onSavePlan(swapDayWorkout(plan, weekNumber, dayIndex, newWorkoutId, library));
   }
@@ -547,6 +559,53 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
             style={{ fontFamily: FONT_BODY, background: 'var(--accent)', border: 'none', borderRadius: 10, padding: '10px 16px', color: INK, fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>
             Finish &amp; archive
           </button>
+        </div>
+      )}
+
+      {/* Stage 3: the weekly review — one moment, once a week, that says how
+          the finished week actually went, takes the check-in answer, and
+          frames whatever proposals follow. Quiet weeks get one calm line
+          and a single tap to close. */}
+      {reviewWeek && reviewSummary && !planComplete && (
+        <div style={{ background: PANEL2, border: '1px solid var(--accent)', borderRadius: 12, padding: 14, marginBottom: 12 }}>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 10.5, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 4 }}>Weekly review</div>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: TEXT, fontWeight: 700, marginBottom: 5 }}>
+            Week {reviewWeek}{reviewSummary.isRecovery ? ' (recovery week)' : ''}: {reviewSummary.ridden} of {reviewSummary.total} sessions ridden
+            {reviewSummary.complianceRatio != null ? ` — about ${Math.round(reviewSummary.complianceRatio * 100)}% of the planned load` : ''}
+          </div>
+          {!reviewSummary.checkinAnswered ? (
+            reviewMissedReason ? (
+              <>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 8 }}>Mostly fatigue, or mostly schedule? Fatigue gets a recovery week; a busy calendar just eases the load.</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button onClick={() => { handleCheckin(reviewWeek, 'missed-a-lot', 'fatigue'); setReviewMissedReason(false); }}
+                    style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '7px 12px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL, color: TEXT, cursor: 'pointer' }}>Fatigue</button>
+                  <button onClick={() => { handleCheckin(reviewWeek, 'missed-a-lot', 'schedule'); setReviewMissedReason(false); }}
+                    style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '7px 12px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL, color: TEXT, cursor: 'pointer' }}>Schedule</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 8 }}>How did the week feel? Your answer tunes the weeks ahead:</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[['too-easy', 'Too easy'], ['about-right', 'About right'], ['too-hard', 'Too hard'], ['missed-a-lot', 'Missed a lot']].map(([key, label]) => (
+                    <button key={key} onClick={() => (key === 'missed-a-lot' ? setReviewMissedReason(true) : handleCheckin(reviewWeek, key))}
+                      style={{ fontFamily: FONT_BODY, fontSize: 12, padding: '7px 12px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL, color: TEXT, cursor: 'pointer' }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )
+          ) : (
+            <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 4 }}>
+              {proposals.length ? 'A couple of suggestions below — apply what fits, dismiss what doesn’t.' : 'Nothing needs changing — the plan carries on as scheduled.'}
+            </div>
+          )}
+          {reviewSummary.checkinAnswered && (
+            <button onClick={closeReview}
+              style={{ fontFamily: FONT_BODY, marginTop: 8, background: 'var(--accent)', border: 'none', borderRadius: 9, padding: '8px 14px', color: INK, fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>
+              Done
+            </button>
+          )}
         </div>
       )}
 
@@ -711,6 +770,30 @@ export default function PlannerView({ plan, ftp, recentWeeklyTss, library, worko
             onOpen={onOpenPlanWorkout} onSwap={handleSwap} onCheckin={handleCheckin} onLogOutdoor={onLogOutdoor} />
         ))}
       </div>
+
+      {/* The adaptation log: every change the plan has made to itself, when,
+          and — in one sentence — why. This is the "your plan adapts, and it
+          tells you why" story, readable end to end. */}
+      {(plan.adaptationLog || []).length > 0 && (
+        <div style={{ marginTop: 4, marginBottom: 18 }}>
+          <button onClick={() => setShowChanges(v => !v)}
+            style={{ fontFamily: FONT_BODY, display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, color: SUB, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+            {showChanges ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Plan changes ({plan.adaptationLog.length})
+          </button>
+          {showChanges && (
+            <div style={{ marginTop: 8 }}>
+              {[...plan.adaptationLog].reverse().map((e, i) => (
+                <div key={i} style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '9px 12px', marginBottom: 6 }}>
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 3 }}>
+                    {new Date(e.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                  </div>
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: TEXT, lineHeight: 1.5 }}>{e.reason}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Past plans (archive) on the active-plan screen too */}
       <ArchiveList plans={archivedPlans} onDelete={onDeleteArchivedPlan} />
