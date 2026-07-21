@@ -1,0 +1,10 @@
+# Installed packages -- recreated by `npm ci` anywhere they're needed
+# (Codemagic, Vercel, and local sessions all install from package-lock.json).
+node_modules/
+
+# Build output -- produced by `npm run build`; never hand-edited, never
+# committed. Codemagic and Vercel both build from source.
+dist/
+
+# OS noise
+.DS_Store
