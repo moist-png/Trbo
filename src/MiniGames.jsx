@@ -605,6 +605,7 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit, cvd }) {
   const simPowerRef = useRef(simPower);
   const wakeLockRef = useRef(null);
   const lastErgRef = useRef(null); // last ERG target written, to avoid redundant BLE writes
+  const lastErgWriteAtRef = useRef(0); // when we last wrote a target, for periodic re-assert
   const beep = useGameBeeper();
 
   useEffect(() => { simPowerRef.current = simPower; }, [simPower]);
@@ -636,6 +637,7 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit, cvd }) {
         const startW = game.ergStartWatts || 150;
         trainer.setErgTarget(startW);
         lastErgRef.current = startW;
+        lastErgWriteAtRef.current = performance.now();
       }
       beep(880, 0.18, 0.14);
       setPhase('playing');
@@ -659,9 +661,30 @@ export function MiniGamePlayer({ game, ftp, trainer, heartRate, onExit, cvd }) {
       stateRef.current = s;
       // Drive the trainer along the game's target curve (rolling start → ramp
       // → hold) so ERG resistance eases in instead of slamming to full watts.
+      //
+      // Two things matter here, both learned from the "Beat the Pros ERG never
+      // brought the resistance up, so I spun madly and couldn't catch the pro"
+      // report on a wheel-on trainer (KICKR SNAP):
+      //   1. RE-ASSERT the target at least once a second even when it hasn't
+      //      changed. Previously, once the hold phase started, the pro wattage
+      //      was written exactly ONCE (at the end of the ramp) and never again,
+      //      because the target stops changing. A wheel-on trainer that dropped
+      //      or lagged that single write then sat at low resistance for the
+      //      whole effort with nothing to correct it. A steady ~1 Hz refresh is
+      //      normal ERG behaviour and guarantees the trainer reaches pro watts.
+      //   2. THROTTLE the ramp to >=5 W steps. The old code sent a fresh target
+      //      every 250 ms tick during the 15 s ramp (~60 rapid writes); some
+      //      trainers can't chase a target that keeps moving that fast and never
+      //      settle. Bigger, less frequent steps are easier to follow.
       if (game.usesErg && trainer.hasControl && s.ergTarget != null) {
         const w = Math.round(s.ergTarget);
-        if (w !== lastErgRef.current) { trainer.setErgTarget(w); lastErgRef.current = w; }
+        const movedEnough = Math.abs(w - (lastErgRef.current == null ? -9999 : lastErgRef.current)) >= 5;
+        const dueForRefresh = (now - lastErgWriteAtRef.current) >= 1000;
+        if (movedEnough || dueForRefresh) {
+          trainer.setErgTarget(w);
+          lastErgRef.current = w;
+          lastErgWriteAtRef.current = now;
+        }
       }
       if (s.finished) {
         if (game.usesErg && trainer.hasControl && trainer.endErg) trainer.endErg();

@@ -7245,6 +7245,12 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
 
       <SectionHeader icon={<HeartPulse size={16} color="var(--accent)" />} title="Heart rate monitor" />
       <BleConnectRow conn={heartRate} statusColor={hrStatusColor} statusLabel={hrStatusLabel} />
+      {heartRate.status !== 'connected' && (
+        <div style={{ display: 'flex', gap: 6, fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, marginBottom: 6, lineHeight: 1.5 }}>
+          <Info size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>A chest strap or armband just needs to be worn — the sensor wakes on skin contact. A watch (Coros, Garmin, Apple Watch, etc.) won't show up until you turn on its <b style={{ color: TEXT }}>Broadcast Heart Rate</b> mode — that's the setting that makes the watch send its heart rate over Bluetooth for another app to pick up.</span>
+        </div>
+      )}
       {!heartRate.supported && (
         <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, marginBottom: 6, lineHeight: 1.5 }}>
           Bluetooth isn't available here. Works with any standard BLE chest strap or armband — Polar, Wahoo, Garmin and most others.
