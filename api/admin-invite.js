@@ -1,21 +1,26 @@
 // A working way to get a specific person into Trbo while public signups
 // stay paused (see supabase-setup.sql / the GDPR Article 27 note).
 //
-// The dashboard's "Invite" button and the client-side signUp() call both
-// go through Supabase's "Allow new users to sign up" switch -- which is
-// exactly the switch that's turned off right now, so both are blocked.
-// admin.createUser() is a different code path in Supabase's own Auth
-// server: it isn't gated by that switch, only by the Email provider being
-// enabled at all (which it is, since the whole app runs on email auth).
-// So this creates the account directly, then hands back a one-click
-// sign-in link to send the person yourself -- no confirmation email, no
-// dependency on Supabase's or Resend's mail sending at all.
+// This has to go through admin.inviteUserByEmail(), not admin.createUser().
+// Both dodge Supabase's own "Allow new users to sign up" dashboard switch,
+// but there's a second, stricter gate underneath: the handle_new_user()
+// trigger in supabase-setup.sql rejects any new row in auth.users unless
+// invited_at is set, and invited_at is ONLY ever set by the real invite
+// flow (dashboard "Invite user" or inviteUserByEmail) -- never by
+// createUser(). That trigger is also what grants 30 days of tester access
+// automatically to anyone with invited_at set, so using the real invite
+// path here is a two-for-one fix.
+//
+// inviteUserByEmail() does also ask Supabase to send its own invite email,
+// which may or may not arrive (default SMTP is unreliable for addresses
+// outside this account). That's fine -- we ignore it and still generate
+// our own sign-in link below to hand to the person directly.
 //
 // If comp_access is requested, it's set directly here rather than trusted
 // from the browser, matching how it's protected everywhere else in the
 // app (see supabase-setup.sql -- comp_access can't be written by a client
 // with just the anon key).
-import { randomUUID, timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from './_rateLimit.js';
 
@@ -77,17 +82,15 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    email_confirm: true,
-    // Never actually used -- they sign in via the link below, not a
-    // password. Just satisfies the field.
-    password: randomUUID() + randomUUID(),
+  const { data: created, error: createError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+    redirectTo: SITE_URL,
   });
 
   if (createError) {
     const alreadyExists = createError.status === 422 || /already/i.test(createError.message || '');
-    res.status(alreadyExists ? 409 : 500).json({ error: createError.message });
+    res.status(alreadyExists ? 409 : 500).json({
+      error: createError.message || 'Could not create the account (no further detail from Supabase).',
+    });
     return;
   }
 
