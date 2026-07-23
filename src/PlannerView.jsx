@@ -236,7 +236,7 @@ function PlannerSetup({ ftp, recentWeeklyTss, archivedPlans, hasFtpTest, onSetFt
       <div style={sectionLabel}>Are you also doing other structured training?</div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <button onClick={() => setMultiSport(false)} style={chip(!multiSport)}>Cycling only</button>
-        <button onClick={() => setMultiSport(true)} style={chip(multiSport)}>Also run, swim, or gym</button>
+        <button onClick={() => setMultiSport(true)} style={chip(multiSport)}>Run, swim, or gym</button>
       </div>
       {multiSport && (
         <div style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: SUB, marginBottom: 18, lineHeight: 1.5 }}>
@@ -250,15 +250,9 @@ function PlannerSetup({ ftp, recentWeeklyTss, archivedPlans, hasFtpTest, onSetFt
         {recentWeeklyTss > 0
           ? <> and your recent training load (about <span style={{ fontFamily: FONT_NUM, color: TEXT, fontWeight: 600 }}>{Math.round(recentWeeklyTss)} TSS/week</span>).</>
           : <>. Once you've logged a few rides, plans will also tune to your recent training load.</>}
-        {continuationHint && continuationHint.isDirectContinuation && (
-          <> Picking up from your last plan: this one ramps on from roughly where that block left off.</>
-        )}
-        {continuationHint && continuationHint.suggestEasedStart && (
-          <> {continuationHint.weeksSince <= 3 ? "You just came off a peak/taper, so" : `It's been about ${continuationHint.weeksSince} weeks since your last plan, so`} this one starts a bit easier and ramps back up from there.</>
-        )}
         {!hasFtpTest && !estimateUsed && (
           <>
-            {' '}That number hasn't come from a test yet.{' '}
+            {' '}
             <button onClick={() => setShowEstimate(v => !v)}
               style={{ fontFamily: FONT_BODY, background: 'none', border: 'none', padding: 0, color: TEXT, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', textDecoration: 'underline' }}>
               Estimate a starting point

@@ -75,6 +75,11 @@ const INK = '#14171A';
 const BG = 'var(--bg)';
 const PANEL = 'var(--panel)';
 const PANEL2 = 'var(--panel2)';
+// Background behind the interval bars in the workout visualiser strips.
+// On the sandy/light themes this is a deliberately deeper tone than PANEL2
+// so the pale lime Threshold/Sweet-Spot bars keep a visible top edge instead
+// of washing out against the card. On dark it equals PANEL2 (no change).
+const CHARTBG = 'var(--chartbg)';
 const LINE = 'var(--line)';
 const TEXT = 'var(--text)';
 const SUB = 'var(--sub)';
@@ -84,6 +89,7 @@ const NAVBG = 'var(--navbg)';
 const THEMES = {
   dark: {
     bg: '#14171A', panel: '#1D2126', panel2: '#242930', line: '#31373F',
+    chartbg: '#242930',
     text: '#E9ECEF', sub: '#8B929B', red: '#FF4D4D', muted: '#4a4f56',
     navbg: 'rgba(20,23,26,0.96)',
     // NEW: category hero surfaces + streak flame
@@ -97,6 +103,7 @@ const THEMES = {
   },
   light: {
     bg: '#F3F4F6', panel: '#FFFFFF', panel2: '#ECEEF1', line: '#DDE1E6',
+    chartbg: '#D7DCE3',
     text: '#14171A', sub: '#6B7280', red: '#D9333F', muted: '#C7CBD1',
     navbg: 'rgba(255,255,255,0.96)',
     hero1: 'repeating-linear-gradient(135deg,#EEF1F3,#EEF1F3 10px,#E7EBEE 10px,#E7EBEE 20px)',
@@ -110,6 +117,7 @@ const THEMES = {
   // NEW THEME
   palette: {
     bg: '#F3EDE3', panel: '#FFFFFF', panel2: '#E9E0D0', line: '#E3D9C8',
+    chartbg: '#C7B896',
     text: '#2A2A2A', sub: '#9A9184', red: '#C0392B', muted: '#CFC5B4',
     navbg: 'rgba(250,246,239,0.96)',
     hero1: '#C0F5ED', hero1ink: '#1F6F63', hero1chip: 'rgba(255,255,255,0.72)',
@@ -3939,7 +3947,7 @@ function SegmentBars({ intervals, onSegmentClick }) {
         const isFree = it.type === 'free';
         return (
           <div key={it.id} onClick={onSegmentClick ? () => onSegmentClick(it.id) : undefined}
-            style={{ width: `${w}%`, height: '100%', display: 'flex', alignItems: 'flex-end', borderRight: `1px solid ${PANEL2}`, cursor: onSegmentClick ? 'pointer' : 'default' }}>
+            style={{ width: `${w}%`, height: '100%', display: 'flex', alignItems: 'flex-end', borderRight: `1px solid ${CHARTBG}`, cursor: onSegmentClick ? 'pointer' : 'default' }}>
             <div style={{ width: '100%', height: `${h}%`, background: isFree ? `repeating-linear-gradient(135deg, ${z.color}, ${z.color} 4px, ${LINE} 4px, ${LINE} 8px)` : z.color }} />
           </div>
         );
@@ -3950,7 +3958,7 @@ function SegmentBars({ intervals, onSegmentClick }) {
 
 function ProfileChart({ intervals, height = 84, progress = null, onSegmentClick }) {
   return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', height, width: '100%', background: PANEL2, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}` }}>
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', height, width: '100%', background: CHARTBG, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}` }}>
       <SegmentBars intervals={intervals} onSegmentClick={onSegmentClick} />
       {progress !== null && (
         <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${progress * 100}%`, background: 'rgba(255,255,255,0.14)', borderRight: `2px solid ${TEXT}`, pointerEvents: 'none' }} />
@@ -3966,7 +3974,7 @@ function ProfileChart({ intervals, height = 84, progress = null, onSegmentClick 
 function QueueProfileStrip({ resolved }) {
   const total = resolved.reduce((sum, w) => sum + totalDuration(w.intervals), 0) || 1;
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', height: 64, width: '100%', background: PANEL2, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}`, marginBottom: 16 }}>
+    <div style={{ display: 'flex', alignItems: 'flex-end', height: 64, width: '100%', background: CHARTBG, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}`, marginBottom: 16 }}>
       {resolved.map((w, i) => {
         const dur = totalDuration(w.intervals) || 1;
         const widthPct = (dur / total) * 100;
@@ -5037,7 +5045,7 @@ function FtpView({ ftp, setFtp, ftpHistory, onClearFtpHistory, onOpenWorkout }) 
 
   return (
     <div style={{ padding: '16px 16px 80px' }}>
-      <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 800, textTransform: 'uppercase', fontSize: 26, color: TEXT, letterSpacing: -0.3, marginBottom: 2 }}>FTP</div>
+      <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 800, textTransform: 'uppercase', fontSize: 26, color: TEXT, letterSpacing: -0.3, marginBottom: 2, lineHeight: 1.05 }}>Functional threshold power</div>
       <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 13, color: SUB, marginBottom: 18 }}>Test your threshold power and keep an eye on it over time.</div>
 
       <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -5101,15 +5109,18 @@ function FtpView({ ftp, setFtp, ftpHistory, onClearFtpHistory, onOpenWorkout }) 
 // ---------- library view ----------
 const LIBRARY_SORTS = [
   { key: 'default', label: 'Default' },
+  { key: 'starred', label: 'Starred' },
   { key: 'short', label: 'Shortest' },
   { key: 'long', label: 'Longest' },
   { key: 'easy', label: 'Easiest' },
   { key: 'hard', label: 'Hardest' },
-  { key: 'starred', label: 'Starred' },
 ];
 function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, category, onCategoryChange, starredIds, onToggleStar }) {
   const [query, setQuery] = useState('');
-  const [localCat, setLocalCat] = useState(lockedCategory || 'All');
+  // Defaults to 'All'. On the Workouts/Rides tabs the locked top-level
+  // category is applied separately, and this local value is the training-type
+  // sub-filter the chip row drives (so it starts on 'All', not the tab itself).
+  const [localCat, setLocalCat] = useState('All');
   const cvd = useContext(ColorblindContext);
   // Category can be driven externally (the sidebar's category list on wide
   // viewports) or kept local (the chip row shown on portrait phone) — both
@@ -5121,21 +5132,24 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
   const [sort, setSort] = useState('default');
   const all = useMemo(() => {
     const withFlag = LIBRARY.map(w => ({ ...w, custom: false })).concat(customWorkouts.map(w => ({ ...w, custom: true })));
-    const activeCat = lockedCategory || cat;
-    const purpose = CATEGORY_TO_PURPOSE[activeCat];
     const list = withFlag.filter(w => {
-      if (activeCat === 'All') return true;
-      if (activeCat === 'Custom') return w.custom;
-      if (activeCat === 'Pain') return !!w.pain;
+      // Workouts/Rides tabs lock a top-level category; the chip row then
+      // sub-filters within it by training type. The Library has no lock, so
+      // its chip row is itself the top-level selector.
+      if (lockedCategory && w.category !== lockedCategory) return false;
+      if (cat === 'All') return true;
+      if (cat === 'Custom') return w.custom;
+      if (cat === 'Pain') return !!w.pain;
+      const purpose = CATEGORY_TO_PURPOSE[cat];
       if (purpose) {
         // Built-ins: match their real tagged purpose. Custom workouts have
         // no entry in WORKOUT_PURPOSE (it's keyed by fixed library ids), so
         // fall back to whatever category the builder saved on them directly.
         const wPurpose = WORKOUT_PURPOSE[w.id];
         const resolvedPurpose = wPurpose ? (PURPOSE_CHIP_ALIASES[wPurpose] || wPurpose) : null;
-        return resolvedPurpose ? resolvedPurpose === purpose : w.category === activeCat;
+        return resolvedPurpose ? resolvedPurpose === purpose : w.category === cat;
       }
-      return w.category === activeCat; // Rides / Basics
+      return w.category === cat; // Rides / Basics (Library's top-level chips)
     }).filter(w => w.name.toLowerCase().includes(query.toLowerCase()));
     if (sort === 'default') return list;
     const withMeta = list.map(w => ({ w, dur: totalDuration(w.intervals), intensity: workoutIntensity(w), starred: starredIds.has(w.id) ? 1 : 0 }));
@@ -5158,11 +5172,12 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search workouts"
           style={{ background: 'none', border: 'none', outline: 'none', color: TEXT, fontSize: 14, flex: 1 }} />
       </div>
-      {!lockedCategory && (
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
-          {CATEGORIES.filter(c => c !== 'Rides' && c !== 'Basics').concat('Custom', 'Pain').map(c => <Chip key={c} active={cat === c} onClick={() => setCat(cat === c ? 'All' : c)}>{c}</Chip>)}
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
+        {(lockedCategory
+          ? CATEGORIES.filter(c => c !== 'Rides' && c !== 'Basics')
+          : CATEGORIES.filter(c => c !== 'Rides' && c !== 'Basics').concat('Custom', 'Pain')
+        ).map(c => <Chip key={c} active={cat === c} onClick={() => setCat(cat === c ? 'All' : c)}>{c}</Chip>)}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 14 }}>
         <span style={{ fontSize: 11, color: SUB, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', flexShrink: 0 }}>Sort</span>
         {LIBRARY_SORTS.map(s => <Chip key={s.key} active={sort === s.key} onClick={() => setSort(s.key)}>{s.label}</Chip>)}
@@ -5194,8 +5209,8 @@ function LibraryView({ customWorkouts, onOpen, lockedCategory, title, subtitle, 
 }
 
 // ---------- queue view ----------
-const QUEUE_DRAG_HOLD_MS = 320;       // how long a press has to hold still before it's treated as "lift to drag" rather than a tap or a scroll
-const QUEUE_DRAG_MOVE_CANCEL_PX = 8;  // movement past this before the hold timer fires cancels it, treating the gesture as a scroll instead
+const QUEUE_DRAG_HOLD_MS = 600;        // deliberate press-and-hold before a row lifts to drag — long enough that an ordinary tap or scroll never triggers it by accident
+const QUEUE_DRAG_MOVE_CANCEL_PX = 16;  // finger slop tolerated during the hold; only a clear scroll-sized movement cancels, so natural jitter won't rob you of the drag
 
 // Press-and-hold drag reordering for the Queue tab. A quick tap on a row
 // still opens its workout details (same as before) — only a sustained
@@ -5249,6 +5264,9 @@ function QueueRowList({ resolved, onOpen, onRemove, onReorder }) {
       }
       dragRef.current = { ...dragRef.current, holding: true, order0, draggedIndex0, slotHeight };
       setDraggingId(id);
+      // A short buzz confirms the row is now "picked up" and free to move,
+      // so you don't have to guess whether the hold has registered.
+      try { if (navigator.vibrate) navigator.vibrate(20); } catch (err) {}
       try { el.setPointerCapture(pointerId); } catch (err) {}
     }, QUEUE_DRAG_HOLD_MS);
     dragRef.current = { id, pointerId, holdTimer: timer, startY, holding: false };
@@ -7382,11 +7400,15 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
 
       <SectionHeader icon={<Bluetooth size={16} color="var(--accent)" />} title="Trainer connectivity" />
       <BleConnectRow conn={trainer} statusColor={statusColor} statusLabel={statusLabel} />
-      {!trainer.supported && (
+      {!trainer.supported ? (
         <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, marginBottom: 6, lineHeight: 1.5 }}>
-          Bluetooth isn't available here. This works in Chrome on desktop or Android with a trainer that supports the FTMS standard, not in Safari or iOS.
+          Bluetooth isn't available in this browser. Connecting a trainer needs <b style={{ color: TEXT }}>Chrome, Edge, or Opera</b> on desktop (Windows, Mac, Linux, ChromeOS) or Android, with a trainer that supports the FTMS standard. It's not supported in Safari or Firefox, or in any browser on iPhone or iPad. On iOS, use the Trbo app instead.
         </div>
-      )}
+      ) : (!trainer.isNative && trainer.status !== 'connected' && (
+        <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, marginBottom: 6, lineHeight: 1.5 }}>
+          Connecting a trainer over Bluetooth works in <b style={{ color: TEXT }}>Chrome, Edge, or Opera</b> (desktop or Android). Safari, Firefox and browsers on iPhone or iPad can't connect; on iOS, use the Trbo app.
+        </div>
+      ))}
       {trainer.errorMsg && <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: RED, marginBottom: 6 }}>{trainer.errorMsg}</div>}
       <SettingRow label="ERG mode" sub="Trainer auto-sets resistance to match each interval's power target">
         <Switch checked={settings.ergMode} onChange={v => updateSetting('ergMode', v)} disabled={trainer.status !== 'connected' || !trainer.hasControl} />
@@ -8361,7 +8383,7 @@ function InstallHintToast({ onDismiss, onInstall }) {
 const NAV_ITEMS = [
   { key: 'home', label: 'Home', Icon: Home },
   { key: 'library', label: 'Library', Icon: Library },
-  { key: 'basics', label: 'Basics', Icon: Dumbbell },
+  { key: 'basics', label: 'Workouts', Icon: Dumbbell },
   { key: 'rides', label: 'Rides', Icon: Bike },
   { key: 'planner', label: 'Planner', Icon: CalendarDays },
   { key: 'builder', label: 'Builder', Icon: Wrench },
@@ -9254,7 +9276,7 @@ export default function App() {
   }, [workoutHistory]);
 
   const themeVars = {
-    '--bg': theme.bg, '--panel': theme.panel, '--panel2': theme.panel2, '--line': theme.line,
+    '--bg': theme.bg, '--panel': theme.panel, '--panel2': theme.panel2, '--chartbg': theme.chartbg || theme.panel2, '--line': theme.line,
     '--text': theme.text, '--sub': theme.sub, '--red': theme.red, '--muted': theme.muted, '--navbg': theme.navbg,
     // NEW
     '--hero1': theme.hero1, '--hero1-ink': theme.hero1ink, '--hero1-chip': theme.hero1chip,
@@ -9430,6 +9452,10 @@ export default function App() {
   function handleNavigate(key) {
     if (key === 'builder') setEditingWorkout(null);
     if (key === 'library') setLibCategory('All');
+    // Switching tabs closes any open workout detail modal, rather than
+    // leaving it stranded over the newly-selected tab.
+    setDetailWorkout(null);
+    setDetailPresetMinutes(null);
     setView(key);
   }
   function handleSelectCategory(c) {
@@ -9455,7 +9481,7 @@ export default function App() {
             <Suspense fallback={<LazyFallback />}>
             {view === 'home' && <HomeView account={account} ftpHistory={ftpHistory} workoutHistory={workoutHistory} trainingPlan={trainingPlan} onNavigate={setView} onPlayGame={setActiveGame} />}
             {view === 'library' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} category={libCategory} onCategoryChange={setLibCategory} starredIds={starredIds} onToggleStar={toggleStar} />}
-            {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Basics" starredIds={starredIds} onToggleStar={toggleStar} />}
+            {view === 'basics' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Basics" title="Workouts" starredIds={starredIds} onToggleStar={toggleStar} />}
             {view === 'rides' && <LibraryView customWorkouts={customWorkouts} onOpen={setDetailWorkout} lockedCategory="Rides" title="Rides" starredIds={starredIds} onToggleStar={toggleStar} />}
             {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
             {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} workoutHistory={workoutHistory} ftpHistory={ftpHistory} onSetFtp={setFtp} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} onLogOutdoor={logOutdoorRide} />}
