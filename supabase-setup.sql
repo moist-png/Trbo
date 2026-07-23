@@ -626,6 +626,13 @@ returns boolean as $$
   select true; -- keep in sync with SIGNUPS_PAUSED in src/App.jsx
 $$ language sql immutable;
 
+-- invited_at is not reliably present on auth.users at INSERT time even for
+-- genuine Supabase invites (dashboard "Invite user" or inviteUserByEmail),
+-- so a signups-paused check that only looked at invited_at was rejecting
+-- those too. There's a second, reliable exemption below: an admin_invited
+-- flag passed directly in raw_user_meta_data at creation time, which --
+-- unlike invited_at -- is guaranteed present in the same INSERT since it's
+-- literal data handed to the create/invite call (see api/admin-invite.js).
 create or replace function public.handle_new_user()
 returns trigger as $$
 declare
@@ -635,8 +642,12 @@ declare
   is_disposable boolean;
   effective_trial_start timestamptz;
   tester_comp_expires timestamptz;
+  is_approved_invite boolean;
 begin
-  if public.signups_paused() and new.invited_at is null then
+  is_approved_invite := new.invited_at is not null
+    or coalesce((new.raw_user_meta_data->>'admin_invited')::boolean, false);
+
+  if public.signups_paused() and not is_approved_invite then
     raise exception 'Signups are currently paused.' using errcode = 'P0001';
   end if;
 
@@ -654,12 +665,11 @@ begin
     effective_trial_start := now();
   end if;
 
-  -- Anyone who lands here with invited_at set got there through a Supabase
-  -- "Invite user" invite -- and since that's a manual action only you ever
-  -- take, per person, invited already means approved tester. Give them 30
-  -- days of free access starting the moment they accept the invite and set
-  -- a password, no separate approval step on top of the invite itself.
-  if new.invited_at is not null then
+  -- Anyone who lands here as an approved invite (either signal) got there
+  -- through a manual action only you ever take, per person -- invited
+  -- already means approved tester. Give them 30 days of free access
+  -- starting now, no separate approval step on top of the invite itself.
+  if is_approved_invite then
     tester_comp_expires := now() + interval '30 days';
   else
     tester_comp_expires := null;

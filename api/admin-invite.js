@@ -5,11 +5,13 @@
 // Both dodge Supabase's own "Allow new users to sign up" dashboard switch,
 // but there's a second, stricter gate underneath: the handle_new_user()
 // trigger in supabase-setup.sql rejects any new row in auth.users unless
-// invited_at is set, and invited_at is ONLY ever set by the real invite
-// flow (dashboard "Invite user" or inviteUserByEmail) -- never by
-// createUser(). That trigger is also what grants 30 days of tester access
-// automatically to anyone with invited_at set, so using the real invite
-// path here is a two-for-one fix.
+// it's an approved invite. That trigger originally checked invited_at
+// alone, but invited_at turns out not to be reliably set on auth.users at
+// the moment the row is inserted -- even for genuine Supabase invites --
+// so real invites were getting rejected too. The trigger now also accepts
+// an admin_invited flag carried in raw_user_meta_data, which (unlike
+// invited_at) is guaranteed present at insert time since it's literal data
+// handed to this very call. That's the `data` field below.
 //
 // inviteUserByEmail() does also ask Supabase to send its own invite email,
 // which may or may not arrive (default SMTP is unreliable for addresses
@@ -84,6 +86,7 @@ export default async function handler(req, res) {
 
   const { data: created, error: createError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
     redirectTo: SITE_URL,
+    data: { admin_invited: true },
   });
 
   if (createError) {
