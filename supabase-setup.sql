@@ -1168,13 +1168,14 @@ begin
     return;
   end if;
 
-  -- Profile. "Luca Downus" renders as "Luca" on the home screen (it shows the
-  -- first word only). FTP 240 matches the most recent seeded FTP entry.
+  -- Profile. Name is just "Luca" -- no surname, which is fine (the home screen
+  -- shows the first word, Settings shows it whole, and a single name reads
+  -- cleanly in both). FTP 240 matches the most recent seeded FTP entry.
   -- comp_access unlocks the app permanently with no card; comp_expires_at
   -- stays null (that's the separate 30-day tester field). marketing_account
   -- keeps it out of the owner stats and the email sequence.
   update public.profiles
-     set name = 'Luca Downus',
+     set name = 'Luca',
          ftp = v_ftp,
          comp_access = true,
          comp_expires_at = null,
