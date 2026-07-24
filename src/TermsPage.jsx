@@ -73,8 +73,8 @@ export default function TermsPage() {
       <LegalH2>6. Subscriptions and payments</LegalH2>
       <LegalP>
         <strong>Plans.</strong> Trbo offers a monthly subscription at <strong>US$8.99 per month</strong> and an
-        annual subscription at <strong>US$89.99 per year</strong> (10 months paid upfront, 2 months free). Prices are
-        shown at checkout and may exclude taxes, which are added where applicable.
+        annual subscription at <strong>US$89.99 per year</strong> (10 months paid upfront, 2 months free). These
+        prices include any applicable taxes; you will not be charged more than the price shown at checkout.
       </LegalP>
       <LegalP>
         <strong>Auto-renewal.</strong> Subscriptions renew automatically at the end of each billing period and your
