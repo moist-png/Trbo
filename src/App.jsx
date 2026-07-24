@@ -749,6 +749,18 @@ function smartScaleWorkout(originalIntervals, targetSeconds, repeatWholeCore) {
   return assembleScaled(originalIntervals, classes, groups, inGroup, durations, []);
 }
 
+// The shortest a given workout can actually be scaled down to. Long,
+// multi-climb epics especially run out of room to compress well above the
+// slider's nominal 10-minute floor -- scaling toward a near-zero target finds
+// exactly how far the engine can shrink it. Shared by the length slider in
+// the workout detail sheet and the queue's per-item length editor, so both
+// stop the rider at the same real floor rather than a guessed one.
+function computeFloorMinutes(workout) {
+  if (workout.fixedLength) return Math.max(10, Math.ceil(totalDuration(workout.intervals) / 60));
+  const floorSeconds = totalDuration(smartScaleWorkout(workout.intervals, 1, workout.repeatWholeCore));
+  return Math.max(10, Math.ceil(floorSeconds / 60));
+}
+
 // ---------- public demo ride ----------
 // Shown to signed-out visitors only (reached via a "Try a demo ride" link
 // that appends ?demo=ride to the URL — see the demoMode check in App()).
@@ -3378,7 +3390,7 @@ const LIBRARY = [
       iv('Threshold', 180, 'power', 110),
       iv('VO2 max', 120, 'power', 120),
       iv('VO2 max', 20, 'power', 140),
-      iv('VO2 max', 30, 'power', 170),
+      iv('VO2 max', 15, 'power', 170),
       iv('VO2 max', 20, 'power', 140),
       iv('VO2 max', 120, 'power', 120),
       iv('Threshold', 180, 'power', 110),
@@ -3405,46 +3417,46 @@ const LIBRARY = [
   },
   {
     id: 'ride-quad-homicide', name: 'Quad homicide', category: 'Rides', pain: true,
-    description: 'Or is it lung homicide?',
+    description: 'Or is it lung murder?',
     intervals: [
       iv('Warm up', 300, 'power', 55),
       iv('Threshold', 180, 'power', 100),
       iv('Sweet spot', 300, 'power', 90),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('VO2 max', 120, 'power', 120),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('VO2 max', 120, 'power', 110),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('VO2 max', 120, 'power', 120),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('Warm up', 300, 'power', 55),
       iv('Threshold', 180, 'power', 100),
       iv('Sweet spot', 300, 'power', 90),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('VO2 max', 120, 'power', 110),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('VO2 max', 120, 'power', 120),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('VO2 max', 120, 'power', 110),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('Warm up', 300, 'power', 55),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('VO2 max', 120, 'power', 110),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('VO2 max', 120, 'power', 120),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('VO2 max', 120, 'power', 110),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('Sweet spot', 300, 'power', 90),
       iv('Threshold', 180, 'power', 100),
       iv('Warm up', 300, 'power', 55),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('VO2 max', 120, 'power', 120),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('VO2 max', 120, 'power', 110),
-      iv('Sprint', 30, 'power', 130),
+      iv('Sprint', 20, 'power', 130),
       iv('VO2 max', 120, 'power', 120),
-      iv('Sprint', 30, 'power', 200),
+      iv('Sprint', 20, 'power', 200),
       iv('Sweet spot', 300, 'power', 90),
       iv('Threshold', 180, 'power', 100),
       iv('Cool down', 300, 'power', 50),
@@ -3456,7 +3468,7 @@ const LIBRARY = [
     intervals: [
       iv('Warm up', 300, 'power', 55),
       ...repeatIv(15, i => (i < 14
-        ? [iv('VO2 max', 120, 'power', 130), iv('Threshold', 60, 'power', 90)]
+        ? [iv('VO2 max', 120, 'power', 130), iv('Threshold', 60, 'power', 80)]
         : [iv('VO2 max', 120, 'power', 130)])),
       iv('Cool down', 300, 'power', 50),
     ],
@@ -4006,15 +4018,19 @@ function ProfileChart({ intervals, height = 84, progress = null, onSegmentClick 
 // before pressing start. Each workout gets a share of the strip's width
 // proportional to its own duration, with a divider line between workouts.
 function QueueProfileStrip({ resolved }) {
-  const total = resolved.reduce((sum, w) => sum + totalDuration(w.intervals), 0) || 1;
+  // Uses each item's effective (possibly rider-shortened/lengthened) intervals
+  // when present, so the strip reflects what will actually be ridden rather
+  // than every workout's authored length.
+  const total = resolved.reduce((sum, w) => sum + totalDuration(w.effectiveIntervals || w.intervals), 0) || 1;
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', height: 64, width: '100%', background: CHARTBG, borderRadius: 8, overflow: 'hidden', border: `1px solid ${LINE}`, marginBottom: 16 }}>
       {resolved.map((w, i) => {
-        const dur = totalDuration(w.intervals) || 1;
+        const intervals = w.effectiveIntervals || w.intervals;
+        const dur = totalDuration(intervals) || 1;
         const widthPct = (dur / total) * 100;
         return (
           <div key={w.id + '_' + i} style={{ width: `${widthPct}%`, height: '100%', display: 'flex', alignItems: 'flex-end', borderRight: i < resolved.length - 1 ? `2px solid ${TEXT}` : 'none' }}>
-            <SegmentBars intervals={w.intervals} />
+            <SegmentBars intervals={intervals} />
           </div>
         );
       })}
@@ -4490,17 +4506,7 @@ function LengthSlider({ min, max = 360, step = 5, value, onChange, originalMinut
 function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdit, isCustom, onDelete, onSaveScaled, presetMinutes, starred, onToggleStar, inQueue, onToggleQueue }) {
   const originalTotal = totalDuration(workout.intervals);
   const scalable = !workout.fixedLength;
-  // The floor this specific workout can actually reach — long, multi-climb
-  // epics especially run out of room to compress well above the slider's
-  // nominal 10-minute minimum. Scaling toward a near-zero target finds
-  // exactly how far the engine can shrink it, so the slider can stop there
-  // instead of letting the person drag past the point where "actual" stops
-  // changing.
-  const floorSeconds = useMemo(
-    () => (scalable ? totalDuration(smartScaleWorkout(workout.intervals, 1, workout.repeatWholeCore)) : originalTotal),
-    [workout, scalable]
-  );
-  const floorMinutes = Math.max(10, Math.ceil(floorSeconds / 60));
+  const floorMinutes = useMemo(() => computeFloorMinutes(workout), [workout]);
   const initialMinutes = scalable && presetMinutes ? Math.max(floorMinutes, Math.round(presetMinutes)) : Math.max(floorMinutes, Math.round(originalTotal / 60));
   const [targetMinutes, setTargetMinutes] = useState(initialMinutes);
   useEffect(() => { setTargetMinutes(initialMinutes); }, [workout.id, presetMinutes]);
@@ -4554,12 +4560,15 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: SUB, marginTop: 8 }}>
               <span>{floorMinutes > 10 ? fmtLong(floorMinutes * 60) : '10 min'}</span><span>6 hours</span>
             </div>
-            {isScaled && (
-              <button onClick={() => setTargetMinutes(Math.max(floorMinutes, Math.round(originalTotal / 60)))}
-                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
-                Reset to original length
-              </button>
-            )}
+            {/* Always rendered (not conditional on isScaled) so this line never
+                appears/disappears as the slider crosses the original value --
+                that popping in and out was shoving the Start/Queue buttons
+                below up and down while dragging. It just goes inert instead. */}
+            <button onClick={() => isScaled && setTargetMinutes(Math.max(floorMinutes, Math.round(originalTotal / 60)))}
+              disabled={!isScaled}
+              style={{ marginTop: 6, background: 'none', border: 'none', color: isScaled ? 'var(--accent)' : SUB, opacity: isScaled ? 1 : 0.5, fontSize: 12, cursor: isScaled ? 'pointer' : 'default', padding: 0 }}>
+              Reset to original length
+            </button>
           </div>
         )}
 
@@ -4568,7 +4577,7 @@ function WorkoutDetail({ workout, ftp, setFtp, settings, onStart, onClose, onEdi
             style={{ flex: 2, padding: '12px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}>
             <Play size={18} fill={INK} /> Start workout
           </button>
-          <button onClick={() => onToggleQueue(workout.id)} title={inQueue ? 'Remove from queue' : 'Add to queue'}
+          <button onClick={() => onToggleQueue(workout.id, isScaled ? targetMinutes : undefined)} title={inQueue ? 'Remove from queue' : 'Add to queue'}
             style={{ flex: 1, padding: '12px 0', borderRadius: 10, border: `1px solid ${inQueue ? 'var(--accent)' : LINE}`, background: inQueue ? 'var(--accent)' : PANEL2, color: inQueue ? INK : TEXT, fontWeight: 700, fontSize: 13.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
             <ListOrdered size={16} /> {inQueue ? 'Queued' : 'Queue'}
           </button>
@@ -5250,7 +5259,7 @@ const QUEUE_DRAG_MOVE_CANCEL_PX = 16;  // finger slop tolerated during the hold;
 // still opens its workout details (same as before) — only a sustained
 // press-and-hold lifts the row so it can be dragged to a new position,
 // which is far more touch-friendly than the old up/down arrow buttons.
-function QueueRowList({ resolved, onOpen, onRemove, onReorder }) {
+function QueueRowList({ resolved, onOpen, onRemove, onReorder, onEditLength }) {
   const [order, setOrder] = useState(() => resolved.map(w => w.id));
   useEffect(() => { setOrder(resolved.map(w => w.id)); }, [resolved]);
   const byId = useMemo(() => {
@@ -5370,8 +5379,20 @@ function QueueRowList({ resolved, onOpen, onRemove, onReorder }) {
             <div onClick={e => handleRowClick(e, w)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
               <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 10, color: SUB, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 3 }}>#{i + 1}</div>
               <div style={{ fontFamily: "'Big Shoulders Display', sans-serif", fontWeight: 700, fontSize: 15.5, color: TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</div>
-              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11.5, color: SUB, marginTop: 2 }}>{fmtLong(totalDuration(w.intervals))} · {w.category}</div>
+              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 11.5, color: SUB, marginTop: 2 }}>{w.category}</div>
             </div>
+            {/* Tapping the length, unlike the rest of the row, opens the
+                per-item length editor rather than the full workout sheet --
+                it's the one thing about a queued ride worth adjusting without
+                leaving this list. Stops the row's own click/drag handling so
+                it doesn't also open the detail sheet or start a reorder. */}
+            <button
+              onClick={e => { e.stopPropagation(); onEditLength(w); }}
+              onPointerDown={e => e.stopPropagation()}
+              title="Adjust length"
+              style={{ flexShrink: 0, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 12.5, color: w.isCustomLength ? 'var(--accent)' : SUB, background: 'none', border: `1px solid ${w.isCustomLength ? 'var(--accent)' : LINE}`, borderRadius: 7, padding: '5px 9px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {fmtLong(w.effectiveSeconds)}
+            </button>
             <div style={{ color: SUB, display: 'flex', alignItems: 'center', padding: '4px 2px' }}><GripVertical size={18} /></div>
             <IconBtn onClick={() => onRemove(w.id)} danger><Trash2 size={15} /></IconBtn>
           </div>
@@ -5446,7 +5467,7 @@ function SavedQueuesList({ savedQueues, customWorkouts, queue = [], onLoad, onUn
           const totalSecs = resolvedWorkouts.reduce((sum, w) => sum + totalDuration(w.intervals), 0);
           // "Loaded" when the active queue is exactly this saved set, in order.
           // Then the button flips to Unload and clears the queue on press.
-          const isLoaded = sq.workoutIds.length > 0 && sq.workoutIds.length === queue.length && sq.workoutIds.every((id, i) => id === queue[i]);
+          const isLoaded = sq.workoutIds.length > 0 && sq.workoutIds.length === queue.length && sq.workoutIds.every((id, i) => id === queue[i]?.id);
           return (
             <div key={sq.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 12, padding: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -5510,7 +5531,7 @@ function AddToQueueModal({ queue, customWorkouts, onToggle, onClose }) {
         </div>
         <div style={{ overflowY: 'auto', WebkitOverflowScrolling: 'touch', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {matches.map(w => {
-            const inQ = queue.includes(w.id);
+            const inQ = queue.some(q => q.id === w.id);
             return (
               <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 10, padding: '10px 12px' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -5533,18 +5554,103 @@ function AddToQueueModal({ queue, customWorkouts, onToggle, onClose }) {
   );
 }
 
-function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear, onStartQueue, onToggleQueue, savedQueues = [], maxSavedQueues = 8, maxSavedQueueWorkouts = 8, onSaveQueue, onLoadSavedQueue, onDeleteSavedQueue, lastRemovedQueueItem, onUndoRemove }) {
+// Adjusts one already-queued item's length in place, without leaving the
+// Queue tab. Mirrors the length slider in the full workout detail sheet, but
+// scoped to a single queue entry: the chosen length (or a return to the
+// original) is reported back through onClose and the caller remembers it
+// against that queue item specifically.
+function QueueLengthEditor({ workout, initialMinutes, accent, onClose }) {
+  const originalTotal = totalDuration(workout.intervals);
+  const scalable = !workout.fixedLength;
+  const floorMinutes = useMemo(() => computeFloorMinutes(workout), [workout]);
+  const baseMinutes = Math.max(floorMinutes, Math.round(originalTotal / 60));
+  const [targetMinutes, setTargetMinutes] = useState(() => (scalable && initialMinutes ? Math.max(floorMinutes, Math.round(initialMinutes)) : baseMinutes));
+
+  const scaledIntervals = useMemo(
+    () => (scalable ? smartScaleWorkout(workout.intervals, targetMinutes * 60, workout.repeatWholeCore) : workout.intervals),
+    [workout, targetMinutes, scalable]
+  );
+  const actualTotal = totalDuration(scaledIntervals);
+  const isScaled = scalable && Math.abs(actualTotal - originalTotal) > 20;
+
+  function close() { onClose(isScaled ? targetMinutes : null); }
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close() closes over targetMinutes, so it must be re-bound whenever that changes
+  }, [targetMinutes]);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', boxSizing: 'border-box' }} onClick={close}>
+      <div onClick={e => e.stopPropagation()} style={{ background: BG, width: '100%', maxWidth: 420, borderRadius: 18, border: `1px solid ${LINE}`, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, gap: 12 }}>
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 18, fontWeight: 600, color: TEXT, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workout.name}</div>
+          <button onClick={close} style={{ background: 'none', border: 'none', color: SUB, cursor: 'pointer', padding: 4, flexShrink: 0 }}><X size={20} /></button>
+        </div>
+        {!scalable ? (
+          <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, color: SUB, marginTop: 10 }}>
+            This one's a fixed-length ride and can't be shortened or lengthened. It'll ride at {fmtLong(originalTotal)}.
+          </div>
+        ) : (
+          <div style={{ marginTop: 14 }}>
+            <LengthSlider
+              min={floorMinutes} max={360} step={5}
+              value={targetMinutes} onChange={setTargetMinutes}
+              originalMinutes={baseMinutes}
+              accent={accent}
+              valueLabel={`${targetMinutes} min${isScaled ? ` → ${fmtLong(actualTotal)} actual` : ''}`}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: SUB, marginTop: 8 }}>
+              <span>{floorMinutes > 10 ? fmtLong(floorMinutes * 60) : '10 min'}</span><span>6 hours</span>
+            </div>
+            <button onClick={() => isScaled && setTargetMinutes(baseMinutes)}
+              disabled={!isScaled}
+              style={{ marginTop: 6, background: 'none', border: 'none', color: isScaled ? 'var(--accent)' : SUB, opacity: isScaled ? 1 : 0.5, fontSize: 12, cursor: isScaled ? 'pointer' : 'default', padding: 0 }}>
+              Reset to original length
+            </button>
+          </div>
+        )}
+        <button onClick={close}
+          style={{ marginTop: 18, width: '100%', padding: '11px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QueueView({ queue, customWorkouts, settings, onOpen, onRemove, onReorder, onClear, onStartQueue, onToggleQueue, onSetQueueLength, savedQueues = [], maxSavedQueues = 8, maxSavedQueueWorkouts = 8, onSaveQueue, onLoadSavedQueue, onDeleteSavedQueue, lastRemovedQueueItem, onUndoRemove }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const accentFam = useMemo(() => accentFamily(settings.accentColor), [settings.accentColor]);
+  // Each item carries its own remembered length (queueMinutes, null meaning
+  // "ride it at its authored length"). effectiveIntervals/effectiveSeconds are
+  // that item scaled to it, so the visualiser, the row's duration, and the
+  // total below all reflect what will actually be ridden -- while .intervals
+  // itself stays the true original, so opening the full detail sheet or
+  // re-editing the length always scales from the real baseline.
   const resolved = useMemo(() => {
     const all = LIBRARY.concat(customWorkouts);
-    return queue.map(id => all.find(w => w.id === id)).filter(Boolean);
+    return queue.map(item => {
+      const w = all.find(x => x.id === item.id);
+      if (!w) return null;
+      const scalable = !w.fixedLength;
+      const originalSeconds = totalDuration(w.intervals);
+      const queueMinutes = scalable && item.minutes ? item.minutes : null;
+      const effectiveIntervals = queueMinutes ? smartScaleWorkout(w.intervals, queueMinutes * 60, w.repeatWholeCore) : w.intervals;
+      const effectiveSeconds = totalDuration(effectiveIntervals);
+      return { ...w, queueMinutes, effectiveIntervals, effectiveSeconds, isCustomLength: queueMinutes != null && Math.abs(effectiveSeconds - originalSeconds) > 20 };
+    }).filter(Boolean);
   }, [queue, customWorkouts]);
-  const totalSeconds = resolved.reduce((sum, w) => sum + totalDuration(w.intervals), 0);
+  const totalSeconds = resolved.reduce((sum, w) => sum + w.effectiveSeconds, 0);
   const removedWorkout = useMemo(() => {
     if (!lastRemovedQueueItem) return null;
     return LIBRARY.concat(customWorkouts).find(w => w.id === lastRemovedQueueItem.id) || null;
   }, [lastRemovedQueueItem, customWorkouts]);
+  const editingWorkout = editingId ? resolved.find(w => w.id === editingId) : null;
 
   return (
     <div style={{ padding: '16px 16px 80px' }}>
@@ -5573,12 +5679,12 @@ function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear
         <>
           <QueueProfileStrip resolved={resolved} />
 
-          <button onClick={() => onStartQueue(resolved)}
+          <button onClick={() => onStartQueue(resolved.map(w => ({ ...w, intervals: w.effectiveIntervals })))}
             style={{ fontFamily: "'Manrope', sans-serif", width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: 'var(--accent)', color: INK, fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer', marginBottom: 16 }}>
             <Play size={18} fill={INK} /> Start queue
           </button>
 
-          <QueueRowList resolved={resolved} onOpen={onOpen} onRemove={onRemove} onReorder={onReorder} />
+          <QueueRowList resolved={resolved} onOpen={w => onOpen(w, w.queueMinutes)} onRemove={onRemove} onReorder={onReorder} onEditLength={w => setEditingId(w.id)} />
 
           <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <SaveQueueControl queueLength={resolved.length} savedCount={savedQueues.length} maxSaved={maxSavedQueues} maxWorkouts={maxSavedQueueWorkouts} onSave={onSaveQueue} />
@@ -5613,6 +5719,15 @@ function QueueView({ queue, customWorkouts, onOpen, onRemove, onReorder, onClear
 
       {addOpen && (
         <AddToQueueModal queue={queue} customWorkouts={customWorkouts} onToggle={onToggleQueue} onClose={() => setAddOpen(false)} />
+      )}
+
+      {editingWorkout && (
+        <QueueLengthEditor
+          workout={editingWorkout}
+          initialMinutes={editingWorkout.queueMinutes}
+          accent={accentFam}
+          onClose={minutes => { onSetQueueLength(editingWorkout.id, minutes); setEditingId(null); }}
+        />
       )}
     </div>
   );
@@ -7818,7 +7933,11 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
             ) : (
               <div style={{ background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, padding: 12 }}>
                 <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, lineHeight: 1.55, marginBottom: 10 }}>
-                  This permanently deletes your account and all your training data &mdash; plans, ride and FTP history, custom workouts, saved queues and feedback. <b style={{ color: TEXT }}>It can&rsquo;t be undone.</b> Billing stops now; your past invoices are kept by Stripe as tax records. Type <b style={{ color: TEXT }}>DELETE</b> to confirm.
+                  This permanently deletes your account and all your training data &mdash; plans, ride and FTP history, custom workouts, saved queues and feedback. <b style={{ color: TEXT }}>It can&rsquo;t be undone.</b>{' '}
+                  {subscribed && !compAccess
+                    ? <>Your subscription is cancelled <b style={{ color: TEXT }}>immediately</b>, not at the end of your current billing period &mdash; unlike pausing, any days you&rsquo;ve already paid for are given up, not carried forward. Past invoices are kept by Stripe as tax records.{' '}</>
+                    : <>Billing stops now; your past invoices are kept by Stripe as tax records.{' '}</>}
+                  Type <b style={{ color: TEXT }}>DELETE</b> to confirm.
                 </div>
                 <input value={deleteText} onChange={e => setDeleteText(e.target.value)} placeholder="DELETE" autoFocus
                   style={{ fontFamily: "'Manrope', sans-serif", width: '100%', boxSizing: 'border-box', background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '9px 11px', fontSize: 13.5, marginBottom: 10 }} />
@@ -8848,7 +8967,7 @@ export default function App() {
   const [settings, setSettingsState] = useState(DEFAULT_SETTINGS);
   const [customWorkouts, setCustomWorkouts] = useState([]);
   const [starredIds, setStarredIds] = useState(new Set());
-  const [queue, setQueue] = useState([]); // ordered array of workout ids lined up to ride back-to-back
+  const [queue, setQueue] = useState([]); // ordered array of { id, minutes } lined up to ride back-to-back; minutes is a remembered custom length, or null for the workout's authored length
   const [savedQueues, setSavedQueues] = useState([]); // named, reloadable queue presets ("Monday plan", etc.)
   const [lastRemovedQueueItem, setLastRemovedQueueItem] = useState(null); // { id, index } of the most recently removed queue workout, for Undo
   const undoTimerRef = useRef(null);
@@ -9024,9 +9143,15 @@ export default function App() {
       const { data: starred, error: starredErr } = await supabase.from('starred_workouts').select('workout_id').eq('user_id', user.id);
       if (mounted && !starredErr && starred) setStarredIds(new Set(starred.map(s => s.workout_id)));
       // Wrapped the same way — degrades to an empty (but working) queue if
-      // queued_workouts hasn't been created yet.
-      const { data: queued, error: queuedErr } = await supabase.from('queued_workouts').select('workout_id').eq('user_id', user.id).order('position', { ascending: true });
-      if (mounted && !queuedErr && queued) setQueue(queued.map(q => q.workout_id));
+      // queued_workouts hasn't been created yet. target_minutes (a rider's
+      // remembered custom length for a queued item) is a newer column on the
+      // same table -- if it isn't there yet on this database, fall back to
+      // selecting without it so the queue itself still loads.
+      let { data: queued, error: queuedErr } = await supabase.from('queued_workouts').select('workout_id, target_minutes').eq('user_id', user.id).order('position', { ascending: true });
+      if (queuedErr) {
+        ({ data: queued, error: queuedErr } = await supabase.from('queued_workouts').select('workout_id').eq('user_id', user.id).order('position', { ascending: true }));
+      }
+      if (mounted && !queuedErr && queued) setQueue(queued.map(q => ({ id: q.workout_id, minutes: q.target_minutes ?? null })));
       // Saved queue presets. Wrapped the same way -- degrades to an empty
       // (but working) list if saved_queues hasn't been created yet.
       const { data: saved, error: savedErr } = await supabase.from('saved_queues').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
@@ -9101,6 +9226,13 @@ export default function App() {
   // and open the normal detail sheet, pre-scaled to the plan's target length.
   function openPlanWorkout(workout, plannedSeconds) {
     setDetailPresetMinutes(plannedSeconds ? Math.round(plannedSeconds / 60) : null);
+    setDetailWorkout(workout);
+  }
+  // Opening a workout from the queue: pre-scales the detail sheet to whatever
+  // length was remembered against that queue item, so it doesn't jump back to
+  // the ride's authored length just because you tapped in for a look.
+  function openQueueWorkout(workout, queueMinutes) {
+    setDetailPresetMinutes(queueMinutes || null);
     setDetailWorkout(workout);
   }
 
@@ -9324,18 +9456,39 @@ export default function App() {
 
   // Queue is small (a handful of workouts at most) so the simplest correct
   // way to keep positions in sync is to just replace the whole saved list
-  // after every change, rather than patching individual rows.
-  function persistQueue(ids) {
+  // after every change, rather than patching individual rows. Each item is
+  // { id, minutes } -- minutes is the rider's remembered custom length for
+  // that entry, or null to ride it at its authored length.
+  function persistQueue(items) {
     if (!user) return;
     supabase.from('queued_workouts').delete().eq('user_id', user.id).then(() => {
-      if (ids.length === 0) return;
-      supabase.from('queued_workouts').insert(ids.map((workout_id, i) => ({ user_id: user.id, workout_id, position: i }))).then(() => {});
+      if (items.length === 0) return;
+      const rows = items.map((it, i) => ({ user_id: user.id, workout_id: it.id, position: i, target_minutes: it.minutes ?? null }));
+      supabase.from('queued_workouts').insert(rows).then(({ error }) => {
+        if (error) {
+          // target_minutes isn't a column on this database yet -- fall back
+          // to the base shape so the queue itself still persists; only the
+          // remembered length is lost until the column exists.
+          const fallbackRows = items.map((it, i) => ({ user_id: user.id, workout_id: it.id, position: i }));
+          supabase.from('queued_workouts').insert(fallbackRows).then(() => {});
+        }
+      });
     });
   }
-  function toggleQueue(workoutId) {
+  function toggleQueue(workoutId, minutes) {
     setQueue(prev => {
-      const inQueue = prev.includes(workoutId);
-      const next = inQueue ? prev.filter(id => id !== workoutId) : [...prev, workoutId];
+      const inQueue = prev.some(it => it.id === workoutId);
+      const next = inQueue ? prev.filter(it => it.id !== workoutId) : [...prev, { id: workoutId, minutes: minutes ?? null }];
+      persistQueue(next);
+      return next;
+    });
+  }
+  // Updates just one queue entry's remembered length in place (used by the
+  // Queue tab's per-item length editor) -- position and every other entry
+  // are left untouched.
+  function setQueueItemLength(workoutId, minutes) {
+    setQueue(prev => {
+      const next = prev.map(it => (it.id === workoutId ? { ...it, minutes: minutes ?? null } : it));
       persistQueue(next);
       return next;
     });
@@ -9343,12 +9496,12 @@ export default function App() {
   const UNDO_REMOVE_MS = 8000;
   function removeFromQueue(workoutId) {
     setQueue(prev => {
-      const index = prev.indexOf(workoutId);
-      const next = prev.filter(id => id !== workoutId);
+      const index = prev.findIndex(it => it.id === workoutId);
+      const next = prev.filter(it => it.id !== workoutId);
       persistQueue(next);
       if (index !== -1) {
         if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-        setLastRemovedQueueItem({ id: workoutId, index });
+        setLastRemovedQueueItem({ id: workoutId, index, minutes: prev[index]?.minutes ?? null });
         undoTimerRef.current = setTimeout(() => setLastRemovedQueueItem(null), UNDO_REMOVE_MS);
       }
       return next;
@@ -9360,9 +9513,9 @@ export default function App() {
       if (!item) return null;
       setQueue(prev => {
         // If it somehow got re-added already, don't duplicate it.
-        if (prev.includes(item.id)) return prev;
+        if (prev.some(it => it.id === item.id)) return prev;
         const next = prev.slice();
-        next.splice(Math.min(item.index, next.length), 0, item.id);
+        next.splice(Math.min(item.index, next.length), 0, { id: item.id, minutes: item.minutes ?? null });
         persistQueue(next);
         return next;
       });
@@ -9371,7 +9524,7 @@ export default function App() {
   }
   function moveQueueItem(workoutId, dir) {
     setQueue(prev => {
-      const idx = prev.indexOf(workoutId);
+      const idx = prev.findIndex(it => it.id === workoutId);
       const target = idx + dir;
       if (idx === -1 || target < 0 || target >= prev.length) return prev;
       const next = [...prev];
@@ -9383,16 +9536,19 @@ export default function App() {
   // Used by the Queue tab's press-and-hold drag reorder — takes the whole
   // new order at once (rather than one swap at a time like moveQueueItem)
   // since the rider may have dragged an item past several others in one go.
+  // Only the order changes here; each item's remembered length comes along
+  // with it by looking the existing entry up rather than rebuilding it.
   function reorderQueue(nextIds) {
     setQueue(prev => {
       // Sanity check: only accept it if it's actually a reordering of what's
       // already queued (same ids, same count) — guards against a stray call
       // racing a separate add/remove and corrupting the queue.
       if (nextIds.length !== prev.length) return prev;
-      const prevSet = new Set(prev);
-      if (!nextIds.every(id => prevSet.has(id))) return prev;
-      persistQueue(nextIds);
-      return nextIds;
+      const byId = new Map(prev.map(it => [it.id, it]));
+      if (!nextIds.every(id => byId.has(id))) return prev;
+      const next = nextIds.map(id => byId.get(id));
+      persistQueue(next);
+      return next;
     });
   }
   function clearQueue() {
@@ -9413,7 +9569,9 @@ export default function App() {
     if (queue.length === 0) return { ok: false, reason: 'empty' };
     if (queue.length > MAX_SAVED_QUEUE_WORKOUTS) return { ok: false, reason: 'too-long' };
     const tempId = `temp_${Date.now()}`;
-    const workoutIds = [...queue];
+    // Saved presets remember which workouts, not each one's custom length --
+    // reloading one starts every item back at its authored length.
+    const workoutIds = queue.map(it => it.id);
     setSavedQueues(prev => [...prev, { id: tempId, name: trimmedName, workoutIds }]);
     supabase.from('saved_queues').insert({ user_id: user.id, name: trimmedName, workout_ids: workoutIds }).select('id').maybeSingle().then(({ data }) => {
       if (data) setSavedQueues(prev => prev.map(sq => (sq.id === tempId ? { ...sq, id: data.id } : sq)));
@@ -9423,8 +9581,9 @@ export default function App() {
   function loadSavedQueue(id) {
     const sq = savedQueues.find(s => s.id === id);
     if (!sq) return;
-    setQueue(sq.workoutIds);
-    persistQueue(sq.workoutIds);
+    const items = sq.workoutIds.map(workoutId => ({ id: workoutId, minutes: null }));
+    setQueue(items);
+    persistQueue(items);
   }
   function deleteSavedQueue(id) {
     setSavedQueues(prev => prev.filter(sq => sq.id !== id));
@@ -9464,7 +9623,7 @@ export default function App() {
     setCustomWorkouts(list => list.filter(w => w.id !== id));
     if (user) supabase.from('custom_workouts').delete().eq('id', id).eq('user_id', user.id).then(() => {});
     if (starredIds.has(id)) toggleStar(id);
-    if (queue.includes(id)) removeFromQueue(id);
+    if (queue.some(it => it.id === id)) removeFromQueue(id);
     setDetailWorkout(null);
   }
   function resetCustomWorkouts() {
@@ -9698,7 +9857,7 @@ export default function App() {
             {view === 'games' && <MiniGamesView onPlay={setActiveGame} />}
             {view === 'planner' && <PlannerView plan={trainingPlan} ftp={ftp} recentWeeklyTss={recentWeeklyTss} library={LIBRARY} workoutHistory={workoutHistory} ftpHistory={ftpHistory} onSetFtp={setFtp} onSavePlan={saveTrainingPlan} onOpenPlanWorkout={openPlanWorkout} archivedPlans={archivedPlans} onArchivePlan={archivePlan} onDeleteArchivedPlan={deleteArchivedPlan} onLogOutdoor={logOutdoorRide} />}
             {view === 'builder' && <BuilderView customWorkouts={customWorkouts} saveCustomWorkout={saveCustomWorkout} deleteCustomWorkout={deleteCustomWorkout} editingWorkout={editingWorkout} clearEditing={() => setEditingWorkout(null)} ownerStats={ownerStats} />}
-            {view === 'queue' && <QueueView queue={queue} customWorkouts={customWorkouts} onOpen={setDetailWorkout} onRemove={removeFromQueue} onReorder={reorderQueue} onClear={clearQueue} onStartQueue={startQueue} onToggleQueue={toggleQueue} savedQueues={savedQueues} maxSavedQueues={MAX_SAVED_QUEUES} maxSavedQueueWorkouts={MAX_SAVED_QUEUE_WORKOUTS} onSaveQueue={saveQueueAs} onLoadSavedQueue={loadSavedQueue} onDeleteSavedQueue={deleteSavedQueue} lastRemovedQueueItem={lastRemovedQueueItem} onUndoRemove={undoRemoveFromQueue} />}
+            {view === 'queue' && <QueueView queue={queue} customWorkouts={customWorkouts} settings={settings} onOpen={openQueueWorkout} onRemove={removeFromQueue} onReorder={reorderQueue} onClear={clearQueue} onStartQueue={startQueue} onToggleQueue={toggleQueue} onSetQueueLength={setQueueItemLength} savedQueues={savedQueues} maxSavedQueues={MAX_SAVED_QUEUES} maxSavedQueueWorkouts={MAX_SAVED_QUEUE_WORKOUTS} onSaveQueue={saveQueueAs} onLoadSavedQueue={loadSavedQueue} onDeleteSavedQueue={deleteSavedQueue} lastRemovedQueueItem={lastRemovedQueueItem} onUndoRemove={undoRemoveFromQueue} />}
             {view === 'ftp' && <FtpView ftp={ftp} setFtp={setFtp} ftpHistory={ftpHistory} onClearFtpHistory={clearFtpHistory} onOpenWorkout={setDetailWorkout} />}
             {view === 'history' && <HistoryView workoutHistory={workoutHistory} onClear={clearWorkoutHistory} />}
             {view === 'feedback' && <FeedbackView userId={user.id} />}
@@ -9722,7 +9881,7 @@ export default function App() {
             presetMinutes={detailPresetMinutes}
             isCustom={customWorkouts.some(w => w.id === detailWorkout.id)}
             starred={starredIds.has(detailWorkout.id)} onToggleStar={toggleStar}
-            inQueue={queue.includes(detailWorkout.id)} onToggleQueue={toggleQueue}
+            inQueue={queue.some(q => q.id === detailWorkout.id)} onToggleQueue={toggleQueue}
             onClose={() => { setDetailWorkout(null); setDetailPresetMinutes(null); }}
             onStart={(w) => { setActiveWorkout(w); setDetailWorkout(null); setDetailPresetMinutes(null); }}
             onEdit={() => { setEditingWorkout(detailWorkout); setDetailWorkout(null); setDetailPresetMinutes(null); setView('builder'); }}

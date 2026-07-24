@@ -601,6 +601,13 @@ create table if not exists public.queued_workouts (
 );
 create index if not exists queued_workouts_user_idx on public.queued_workouts (user_id, position);
 
+-- 17a. Remembers a rider's chosen length for a queued item, if they
+--      shortened or lengthened it (via the length slider) before or after
+--      queueing it. Null means "ride it at its authored length" -- the
+--      original behaviour. The app degrades gracefully if this column
+--      isn't present yet: it falls back to plain workout-id queueing.
+alter table public.queued_workouts add column if not exists target_minutes integer;
+
 alter table public.queued_workouts enable row level security;
 drop policy if exists "Users can view own queue" on public.queued_workouts;
 create policy "Users can view own queue" on public.queued_workouts for select using (auth.uid() = user_id);
