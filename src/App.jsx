@@ -188,6 +188,40 @@ function daysLeftInTrial(trialStart) {
 }
 function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
+// Triggers a browser download of some text as a named file. Used by the data
+// export in Settings to save the JSON dump and the ride-history CSV without a
+// round trip to a server the file already came from.
+function downloadTextFile(filename, text, mime = 'text/plain') {
+  try {
+    const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    // Some in-app webviews block blob downloads; fall back to opening the
+    // content in a new tab so the rider can still save it manually.
+    try { window.open(`data:${mime};charset=utf-8,` + encodeURIComponent(text), '_blank'); } catch (_) {}
+  }
+}
+
+// Flattens the exported ride-history rows into a spreadsheet-friendly CSV.
+function rideHistoryToCsv(rows) {
+  const cols = ['date', 'name', 'category', 'duration', 'completed', 'outdoor', 'avg_power', 'max_power', 'tss', 'calories', 'rpe', 'effort_rating'];
+  const esc = (v) => {
+    if (v == null) return '';
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = cols.join(',');
+  const body = (rows || []).map(r => cols.map(c => esc(r[c])).join(',')).join('\n');
+  return `${header}\n${body}`;
+}
+
 // Zone colour palettes for the six training zones (see ZONE_COLORS below).
 // The ColorblindContext itself lives in colorblindContext.js so it can be
 // shared with PlannerView.jsx without a circular import. The default set climbs
@@ -7343,6 +7377,13 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
   const [portalError, setPortalError] = useState('');
   const [pauseBusy, setPauseBusy] = useState(false);
   const [confirmPause, setConfirmPause] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [exportDone, setExportDone] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [fbCategory, setFbCategory] = useState('bug');
   const [fbMessage, setFbMessage] = useState('');
   const [fbStatus, setFbStatus] = useState('idle'); // idle | sending | sent | error
@@ -7413,6 +7454,48 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
     } catch (err) {
       setPortalError(err.message || 'Something went wrong. Please try again.');
       setPortalBusy(false);
+    }
+  }
+
+  // Downloads everything the app holds on this account: one JSON file with the
+  // full picture, plus a spreadsheet-friendly CSV of ride history. The server
+  // reads the real signed-in account off the token, never a client-supplied id.
+  async function exportMyData() {
+    setExportBusy(true);
+    setExportError('');
+    setExportDone(false);
+    try {
+      const res = await apiFetch('/api/export-data', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not export your data.');
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadTextFile(`trbo-data-${stamp}.json`, JSON.stringify(data, null, 2), 'application/json');
+      if (Array.isArray(data.ride_history) && data.ride_history.length) {
+        downloadTextFile(`trbo-ride-history-${stamp}.csv`, rideHistoryToCsv(data.ride_history), 'text/csv');
+      }
+      setExportDone(true);
+    } catch (err) {
+      setExportError(err.message || 'Could not export your data. Please try again.');
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  // Permanently deletes the account and all training data. Guarded by a typed
+  // confirmation in the UI. On success the session is torn down and the app
+  // reloads to the signed-out state.
+  async function deleteMyAccount() {
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      const res = await apiFetch('/api/delete-account', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not delete your account.');
+      try { await supabase.auth.signOut(); } catch (_) {}
+      window.location.href = '/';
+    } catch (err) {
+      setDeleteError(err.message || 'Could not delete your account. Please try again.');
+      setDeleteBusy(false);
     }
   }
 
@@ -7705,6 +7788,54 @@ function SettingsView({ settings, updateSetting, ftp, setFtp, trainer, heartRate
               )}
             </SettingRow>
           )}
+
+          {/* Your data: self-serve export + account deletion (GDPR/UK GDPR
+              access, portability and erasure rights). */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${LINE}` }}>
+            <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12.5, fontWeight: 700, color: TEXT, marginBottom: 4 }}>Your data</div>
+            <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, lineHeight: 1.5, marginBottom: 12 }}>
+              Download everything Trbo holds on you, or delete your account for good. Both act only on the account you&rsquo;re signed into.
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: exportError ? 6 : 12 }}>
+              <button onClick={exportMyData} disabled={exportBusy}
+                style={{ fontFamily: "'Manrope', sans-serif", display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, fontWeight: 600, cursor: exportBusy ? 'default' : 'pointer', opacity: exportBusy ? 0.6 : 1 }}>
+                <Download size={14} /> {exportBusy ? 'Preparing…' : 'Export my data'}
+              </button>
+              {exportDone && !exportBusy && (
+                <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 5 }}><Check size={13} /> Downloaded</span>
+              )}
+            </div>
+            {exportError && (
+              <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: RED, marginBottom: 12 }}>{exportError}</div>
+            )}
+
+            {!confirmDelete ? (
+              <button onClick={() => { setConfirmDelete(true); setDeleteText(''); setDeleteError(''); }}
+                style={{ fontFamily: "'Manrope', sans-serif", display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: RED, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                <Trash2 size={14} /> Delete account
+              </button>
+            ) : (
+              <div style={{ background: PANEL2, border: `1px solid ${LINE}`, borderRadius: 10, padding: 12 }}>
+                <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: SUB, lineHeight: 1.55, marginBottom: 10 }}>
+                  This permanently deletes your account and all your training data &mdash; plans, ride and FTP history, custom workouts, saved queues and feedback. <b style={{ color: TEXT }}>It can&rsquo;t be undone.</b> Billing stops now; your past invoices are kept by Stripe as tax records. Type <b style={{ color: TEXT }}>DELETE</b> to confirm.
+                </div>
+                <input value={deleteText} onChange={e => setDeleteText(e.target.value)} placeholder="DELETE" autoFocus
+                  style={{ fontFamily: "'Manrope', sans-serif", width: '100%', boxSizing: 'border-box', background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8, color: TEXT, padding: '9px 11px', fontSize: 13.5, marginBottom: 10 }} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { setConfirmDelete(false); setDeleteText(''); setDeleteError(''); }} disabled={deleteBusy}
+                    style={{ fontFamily: "'Manrope', sans-serif", padding: '9px 14px', borderRadius: 8, border: `1px solid ${LINE}`, background: PANEL2, color: TEXT, fontSize: 12.5, cursor: deleteBusy ? 'default' : 'pointer' }}>Cancel</button>
+                  <button onClick={deleteMyAccount} disabled={deleteBusy || deleteText.trim().toUpperCase() !== 'DELETE'}
+                    style={{ fontFamily: "'Manrope', sans-serif", padding: '9px 14px', borderRadius: 8, border: 'none', background: RED, color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: (deleteBusy || deleteText.trim().toUpperCase() !== 'DELETE') ? 'default' : 'pointer', opacity: (deleteBusy || deleteText.trim().toUpperCase() !== 'DELETE') ? 0.5 : 1 }}>
+                    {deleteBusy ? 'Deleting…' : 'Permanently delete'}
+                  </button>
+                </div>
+                {deleteError && (
+                  <div style={{ fontFamily: "'Manrope', sans-serif", fontSize: 12, color: RED, marginTop: 10 }}>{deleteError}</div>
+                )}
+              </div>
+            )}
+          </div>
         </>
       )}
 
