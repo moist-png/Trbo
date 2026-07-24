@@ -26,6 +26,40 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const SUPABASE_URL = 'https://wxwdqqjzfrfddqcgkrfv.supabase.co';
 const supabaseAdmin = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
+// Best-effort revocation of Trbo's Strava access on Strava's own side. Dropping
+// the tokens from our database (via the cascade below) stops us holding them,
+// but only deauthorising also tears down the grant on Strava, so nothing is
+// left dangling. Any failure here is swallowed -- it must never block deletion.
+async function revokeStrava(prof) {
+  if (!prof || !prof.strava_refresh_token) return;
+  try {
+    let accessToken = prof.strava_access_token;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (!prof.strava_token_expires_at || prof.strava_token_expires_at <= nowSeconds + 60) {
+      const r = await fetch('https://www.strava.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: process.env.STRAVA_CLIENT_ID,
+          client_secret: process.env.STRAVA_CLIENT_SECRET,
+          grant_type: 'refresh_token',
+          refresh_token: prof.strava_refresh_token,
+        }),
+      });
+      const d = await r.json();
+      if (r.ok && d.access_token) accessToken = d.access_token;
+    }
+    if (accessToken) {
+      await fetch('https://www.strava.com/oauth/deauthorize', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+  } catch (e) {
+    console.error('delete-account: Strava deauthorize failed (continuing):', e?.message);
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -51,7 +85,7 @@ export default async function handler(req, res) {
     // storage (storage objects are not covered by the row cascade below).
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('stripe_subscription_id')
+      .select('stripe_subscription_id, strava_access_token, strava_refresh_token, strava_token_expires_at')
       .eq('id', uid)
       .maybeSingle();
 
@@ -70,6 +104,9 @@ export default async function handler(req, res) {
         console.error('delete-account: subscription cancel failed (continuing):', e?.message);
       }
     }
+
+    // Revoke Trbo's Strava access on Strava's side (best-effort).
+    await revokeStrava(profile);
 
     // Remove feedback photos from the private bucket. Paths are stored on each
     // feedback row as an array under the rider's own uid folder.
